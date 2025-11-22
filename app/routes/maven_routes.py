@@ -18,7 +18,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 from urllib.parse import quote
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 import app.config as config
 import app.utils as utils
 from app.validators import validate_maven_path, safe_join_path, ValidationError
@@ -67,6 +67,45 @@ async def maven_proxy(path: str, request: Request):
     try:
         return await utils.conditional_file_response(
             request, local_path, "application/octet-stream"
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404)
+
+
+# HEAD handler for Maven artifacts (existence/freshness check)
+@router.head("/{path:path}")
+async def maven_head_proxy(path: str, request: Request):
+    """
+    Respond to HEAD requests for Maven artifacts, returning headers (ETag, Last-Modified)
+    without sending the file body. Used by Maven clients to check existence/freshness.
+    """
+    if not validate_maven_path(path):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid Maven path: {path}"
+        )
+    try:
+        local_path = safe_join_path(MAVEN_CACHE, path)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    is_metadata = path.endswith((".xml", ".pom", ".sha1", ".md5"))
+    should_fetch = False
+    if not local_path.exists():
+        should_fetch = True
+    elif is_metadata and utils.is_cache_stale(local_path, max_age_hours=config.MAVEN_METADATA_TTL_HOURS):
+        should_fetch = True
+
+    if should_fetch:
+        upstream_url = f"{MAVEN_UPSTREAM}/{quote(path, safe='/')}"
+        await utils.fetch_and_cache(upstream_url, local_path)
+
+    try:
+        # Only return headers, no body
+        response = await utils.conditional_file_response(request, local_path, "application/octet-stream")
+        return Response(
+            status_code=response.status_code,
+            headers=dict(response.headers),
         )
     except FileNotFoundError:
         raise HTTPException(status_code=404)

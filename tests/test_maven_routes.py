@@ -1,3 +1,66 @@
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from app.routes import maven_routes
+import types
+
+# ...existing code...
+
+@pytest.mark.asyncio
+@patch("app.routes.maven_routes.utils.is_cache_stale", return_value=True)
+@patch("app.routes.maven_routes.utils.conditional_file_response", new_callable=AsyncMock)
+@patch("app.routes.maven_routes.utils.fetch_and_cache", new_callable=AsyncMock)
+async def test_maven_head_proxy_metadata_sha1(mock_fetch, mock_conditional, mock_stale):
+    """Test that .sha1 files are treated as metadata for HEAD and are refreshed if stale."""
+    test_path = "com/example/test/1.0/test-1.0.jar.sha1"
+    with patch.object(Path, "exists", return_value=True):
+        mock_conditional.return_value = type("Resp", (), {"status_code": 200, "headers": {}})()
+        await maven_routes.maven_head_proxy(test_path, request=AsyncMock())
+        mock_fetch.assert_called_once()
+        mock_conditional.assert_called_once()
+
+@pytest.mark.asyncio
+
+@pytest.mark.asyncio
+@patch("app.routes.maven_routes.utils.is_cache_stale", return_value=True)
+@patch("app.routes.maven_routes.utils.conditional_file_response", new_callable=AsyncMock)
+@patch("app.routes.maven_routes.utils.fetch_and_cache", new_callable=AsyncMock)
+async def test_maven_head_proxy_metadata_md5(mock_fetch, mock_conditional, mock_stale):
+    """Test that .md5 files are treated as metadata for HEAD and are refreshed if stale."""
+    test_path = "com/example/test/1.0/test-1.0.jar.md5"
+    with patch.object(Path, "exists", return_value=True):
+        mock_conditional.return_value = type("Resp", (), {"status_code": 200, "headers": {}})()
+        await maven_routes.maven_head_proxy(test_path, request=AsyncMock())
+        mock_fetch.assert_called_once()
+        mock_conditional.assert_called_once()
+
+@pytest.mark.asyncio
+
+@pytest.mark.asyncio
+@patch("app.routes.maven_routes.utils.is_cache_stale", return_value=True)
+@patch("app.routes.maven_routes.utils.conditional_file_response", new_callable=AsyncMock)
+@patch("app.routes.maven_routes.utils.fetch_and_cache", new_callable=AsyncMock)
+async def test_maven_head_proxy_metadata_xml(mock_fetch, mock_conditional, mock_stale):
+    """Test that .xml files are treated as metadata for HEAD and are refreshed if stale."""
+    test_path = "com/example/test/maven-metadata.xml"
+    with patch.object(Path, "exists", return_value=True):
+        mock_conditional.return_value = type("Resp", (), {"status_code": 200, "headers": {}})()
+        await maven_routes.maven_head_proxy(test_path, request=AsyncMock())
+        mock_fetch.assert_called_once()
+        mock_conditional.assert_called_once()
+
+@pytest.mark.asyncio
+@patch("app.routes.maven_routes.utils.conditional_file_response", new_callable=AsyncMock)
+async def test_maven_head_proxy_conditional_error(mock_conditional):
+    """Test that FileNotFoundError in conditional_file_response for HEAD propagates as 404."""
+    test_path = "com/example/test/1.0/test-1.0.jar"
+    with patch.object(Path, "exists", return_value=True):
+        mock_conditional.side_effect = FileNotFoundError
+        with pytest.raises(HTTPException) as exc_info:
+            await maven_routes.maven_head_proxy(test_path, request=AsyncMock())
+        assert exc_info.value.status_code == 404
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Copyright (C) 2025 Mark Sholund
@@ -16,7 +79,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
-
 
 import pytest
 from fastapi import HTTPException
@@ -209,3 +271,4 @@ async def test_maven_proxy_metadata_xml():
                     mock_response.return_value = b"<metadata></metadata>"
                     await maven_routes.maven_proxy(test_path, request=AsyncMock())
                     mock_fetch.assert_called_once()
+
