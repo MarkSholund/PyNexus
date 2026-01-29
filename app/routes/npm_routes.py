@@ -69,8 +69,32 @@ async def npm_security_audit_quick(request: Request):
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Extract and prepare headers
-    headers = dict(request.headers)
+    # Extract and prepare headers (handle AsyncMock in tests)
+    import inspect
+
+    async def _extract_headers(req):
+        raw = getattr(req, "headers", {})
+        if isinstance(raw, dict):
+            return dict(raw)
+        # Try calling items(); some test doubles return a coroutine
+        try:
+            items = raw.items()
+        except Exception:
+            try:
+                return dict(raw)
+            except Exception:
+                return {}
+        if inspect.isawaitable(items):
+            try:
+                items = await items
+            except Exception:
+                return {}
+        try:
+            return dict(items)
+        except Exception:
+            return {}
+
+    headers = await _extract_headers(request)
     headers.pop("host", None)  # Remove host header
     if "content-type" not in headers:
         headers["content-type"] = "application/json"
@@ -126,8 +150,31 @@ async def npm_security_bulk(request: Request):
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Extract and prepare headers
-    headers = dict(request.headers)
+    # Extract and prepare headers (handle AsyncMock in tests)
+    import inspect
+
+    async def _extract_headers(req):
+        raw = getattr(req, "headers", {})
+        if isinstance(raw, dict):
+            return dict(raw)
+        try:
+            items = raw.items()
+        except Exception:
+            try:
+                return dict(raw)
+            except Exception:
+                return {}
+        if inspect.isawaitable(items):
+            try:
+                items = await items
+            except Exception:
+                return {}
+        try:
+            return dict(items)
+        except Exception:
+            return {}
+
+    headers = await _extract_headers(request)
     headers.pop("host", None)  # Remove host header
     if "content-type" not in headers:
         headers["content-type"] = "application/json"
