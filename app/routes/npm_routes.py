@@ -49,39 +49,6 @@ def encode_scoped_package(pkg: str) -> str:
     return quote(pkg)
 
 
-@router.get("/{package:path}")
-async def npm_package_metadata(package: str, request: Request):
-    """
-    Serve package metadata (package.json-style).
-    Example: GET /npm/lodash or /npm/@types/react
-    Only cache metadata; do NOT prefetch tgz files.
-    """
-    # SECURITY: Validate package name format
-    if not validate_npm_package_name(package):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid NPM package name: {package}"
-        )
-
-    try:
-        # Use safe path joining with validation
-        local_path = safe_join_path(NPM_CACHE, package, "index.json")
-    except ValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    # Use is_cache_stale from utils.py for 24h staleness check
-    if utils.is_cache_stale(local_path, max_age_hours=config.NPM_METADATA_TTL_HOURS):
-        upstream_url = f"{NPM_UPSTREAM}/{encode_scoped_package(package)}"
-        await utils.fetch_and_cache(upstream_url, local_path)
-
-    try:
-        return await utils.conditional_file_response(
-            request, local_path, "application/json"
-        )
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Package not found")
-
-
 @router.get("/{package:path}/-/{tarball}")
 async def npm_package_tarball(package: str, tarball: str, request: Request):
     """
@@ -119,6 +86,39 @@ async def npm_package_tarball(package: str, tarball: str, request: Request):
         )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Tarball not found")
+
+
+@router.get("/{package:path}")
+async def npm_package_metadata(package: str, request: Request):
+    """
+    Serve package metadata (package.json-style).
+    Example: GET /npm/lodash or /npm/@types/react
+    Only cache metadata; do NOT prefetch tgz files.
+    """
+    # SECURITY: Validate package name format
+    if not validate_npm_package_name(package):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid NPM package name: {package}"
+        )
+
+    try:
+        # Use safe path joining with validation
+        local_path = safe_join_path(NPM_CACHE, package, "index.json")
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Use is_cache_stale from utils.py for 24h staleness check
+    if utils.is_cache_stale(local_path, max_age_hours=config.NPM_METADATA_TTL_HOURS):
+        upstream_url = f"{NPM_UPSTREAM}/{encode_scoped_package(package)}"
+        await utils.fetch_and_cache(upstream_url, local_path)
+
+    try:
+        return await utils.conditional_file_response(
+            request, local_path, "application/json"
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Package not found")
 
 
 @router.post("/-/npm/v1/security/advisories/bulk")
