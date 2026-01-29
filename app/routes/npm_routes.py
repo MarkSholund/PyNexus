@@ -49,6 +49,121 @@ def encode_scoped_package(pkg: str) -> str:
     return quote(pkg)
 
 
+@router.post("/-/npm/v1/security/audits/quick")
+async def npm_security_audit_quick(request: Request):
+    """
+    Proxy npm audit quick security checks.
+    This endpoint is called by 'npm audit' to perform rapid vulnerability assessment.
+    Cache responses based on a hash of the POST body (dependency tree).
+    Invalidate cache if older than 24 hours.
+    """
+    import hashlib
+
+    body_bytes = await request.body()
+
+    # SECURITY: Use cryptographic hash instead of Python's hash()
+    body_hash = hashlib.sha256(body_bytes).hexdigest()[:16]
+
+    try:
+        local_path = safe_join_path(NPM_CACHE, "security", "audits", f"{body_hash}.json")
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Extract and prepare headers
+    headers = dict(request.headers)
+    headers.pop("host", None)  # Remove host header
+    if "content-type" not in headers:
+        headers["content-type"] = "application/json"
+
+    # Use is_cache_stale from utils.py for 24h staleness check
+    if utils.is_cache_stale(local_path, max_age_hours=config.NPM_METADATA_TTL_HOURS):
+        upstream_url = f"{NPM_UPSTREAM}/-/npm/v1/security/audits/quick"
+        data = await utils.fetch_and_cache(
+            upstream_url, 
+            local_path, 
+            method=HTTPMethod.POST, 
+            data=body_bytes,
+            headers=headers,
+            return_json=True,  # Return JSON directly
+            force_refresh=True  # Force fetch since cache is stale
+        )
+        return data
+
+    try:
+        return await utils.conditional_file_response(
+            request, local_path, "application/json"
+        )
+    except FileNotFoundError:
+        # Cache miss: fetch from upstream
+        upstream_url = f"{NPM_UPSTREAM}/-/npm/v1/security/audits/quick"
+        data = await utils.fetch_and_cache(
+            upstream_url, 
+            local_path, 
+            method=HTTPMethod.POST, 
+            data=body_bytes,
+            headers=headers,
+            return_json=True
+        )
+        return data
+
+
+@router.post("/-/npm/v1/security/advisories/bulk")
+async def npm_security_bulk(request: Request):
+    """
+    Proxy npm audit bulk requests.
+    Save response to cache based on a hash of the POST body.
+    Invalidate cache if older than 24 hours (for security advisories).
+    """
+    import hashlib
+
+    body_bytes = await request.body()
+
+    # SECURITY: Use cryptographic hash instead of Python's hash()
+    body_hash = hashlib.sha256(body_bytes).hexdigest()[:16]
+
+    try:
+        local_path = safe_join_path(NPM_CACHE, "security", f"{body_hash}.json")
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Extract and prepare headers
+    headers = dict(request.headers)
+    headers.pop("host", None)  # Remove host header
+    if "content-type" not in headers:
+        headers["content-type"] = "application/json"
+
+    # Use is_cache_stale from utils.py for 24h staleness check
+    if utils.is_cache_stale(local_path, max_age_hours=config.NPM_METADATA_TTL_HOURS):
+        upstream_url = f"{NPM_UPSTREAM}/-/npm/v1/security/advisories/bulk"
+        data = await utils.fetch_and_cache(
+            upstream_url, 
+            local_path, 
+            method=HTTPMethod.POST, 
+            data=body_bytes,
+            headers=headers,
+            return_json=True,
+            force_refresh=True
+        )
+        return data
+
+    try:
+        return await utils.conditional_file_response(
+            request, local_path, "application/json"
+        )
+    except FileNotFoundError:
+        # Cache miss: fetch from upstream
+        upstream_url = f"{NPM_UPSTREAM}/-/npm/v1/security/advisories/bulk"
+        data = await utils.fetch_and_cache(
+            upstream_url, 
+            local_path, 
+            method=HTTPMethod.POST, 
+            data=body_bytes,
+            headers=headers,
+            return_json=True
+        )
+        return data
+
+
 @router.get("/{package:path}/-/{tarball}")
 async def npm_package_tarball(package: str, tarball: str, request: Request):
     """
@@ -119,43 +234,3 @@ async def npm_package_metadata(package: str, request: Request):
         )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Package not found")
-
-
-@router.post("/-/npm/v1/security/advisories/bulk")
-async def npm_security_bulk(request: Request):
-    """
-    Proxy npm audit bulk requests.
-    Save response to cache based on a hash of the POST body.
-    Invalidate cache if older than 24 hours (for security advisories).
-    """
-    import hashlib
-
-    body_bytes = await request.body()
-
-    # SECURITY: Use cryptographic hash instead of Python's hash()
-    body_hash = hashlib.sha256(body_bytes).hexdigest()[:16]
-
-    try:
-        local_path = safe_join_path(NPM_CACHE, "security", f"{body_hash}.json")
-    except ValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    # Use is_cache_stale from utils.py for 24h staleness check
-    if utils.is_cache_stale(local_path, max_age_hours=config.NPM_METADATA_TTL_HOURS):
-        upstream_url = f"{NPM_UPSTREAM}/-/npm/v1/security/advisories/bulk"
-        data = await utils.fetch_and_cache(
-            upstream_url, local_path, method=HTTPMethod.POST, data=body_bytes
-        )
-        return data
-
-    try:
-        return await utils.conditional_file_response(
-            request, local_path, "application/json"
-        )
-    except FileNotFoundError:
-        # Cache miss or staleness check: fetch from upstream
-        upstream_url = f"{NPM_UPSTREAM}/-/npm/v1/security/advisories/bulk"
-        data = await utils.fetch_and_cache(
-            upstream_url, local_path, method=HTTPMethod.POST, data=body_bytes
-        )
-        return data

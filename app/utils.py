@@ -98,6 +98,7 @@ async def fetch_and_cache(
     dest: Path,
     method: HTTPMethod = HTTPMethod.GET,
     data: bytes | None = None,
+    headers: dict | None = None,
     return_json: bool = False,
     timeout: float = 60.0,
     force_refresh: bool = False,
@@ -110,6 +111,7 @@ async def fetch_and_cache(
         dest: Destination path in cache
         method: HTTP method (GET or POST)
         data: Request body for POST requests
+        headers: HTTP headers to forward to upstream
         return_json: If True, parse and return JSON content
         timeout: Request timeout in seconds
         force_refresh: If True, fetch even if file exists (for cache refresh)
@@ -139,13 +141,18 @@ async def fetch_and_cache(
     # Create parent directories if needed
     dest.parent.mkdir(parents=True, exist_ok=True)
 
+    # Prepare headers with defaults
+    request_headers = headers.copy() if headers else {}
+    if "user-agent" not in request_headers:
+        request_headers["user-agent"] = "fastapi-nexus-proxy/1.0"
+
     # Fetch from upstream
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
         try:
             if method == HTTPMethod.POST:
-                resp = await client.post(url, content=data)
+                resp = await client.post(url, content=data, headers=request_headers)
             else:
-                resp = await client.get(url)
+                resp = await client.get(url, headers=request_headers)
             resp.raise_for_status()
         except httpx.HTTPStatusError as e:
             raise HTTPException(
