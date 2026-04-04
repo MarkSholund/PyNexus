@@ -20,6 +20,12 @@
 from pathlib import Path
 import os
 
+
+def _require_https(url: str, var: str) -> str:
+    if not url.startswith("https://"):
+        raise ValueError(f"{var} must use HTTPS, got: {url!r}")
+    return url
+
 # Base cache directory
 CACHE_DIR = Path(os.environ.get("NEXUS_CACHE_DIR", "cache"))
 
@@ -40,10 +46,10 @@ MAVEN_METADATA_TTL_HOURS: int = int(os.environ.get("MAVEN_METADATA_TTL_HOURS", "
 MAVEN_ARTIFACT_TTL_HOURS: int = int(os.environ.get("MAVEN_ARTIFACT_TTL_HOURS", "0"))  # Immutable artifacts
 MAVEN_SNAPSHOT_TTL_HOURS: int = int(os.environ.get("MAVEN_SNAPSHOT_TTL_HOURS", "1"))  # Snapshots change frequently
 
-# Upstream registry URLs (configurable)
-NPM_REGISTRY: str = os.environ.get("NPM_REGISTRY", "https://registry.npmjs.org")
-PYPI_REGISTRY: str = os.environ.get("PYPI_REGISTRY", "https://pypi.org")
-MAVEN_CENTRAL: str = os.environ.get("MAVEN_CENTRAL", "https://repo1.maven.org/maven2")
+# Upstream registry URLs (configurable, HTTPS required)
+NPM_REGISTRY: str = _require_https(os.environ.get("NPM_REGISTRY", "https://registry.npmjs.org"), "NPM_REGISTRY")
+PYPI_REGISTRY: str = _require_https(os.environ.get("PYPI_REGISTRY", "https://pypi.org"), "PYPI_REGISTRY")
+MAVEN_CENTRAL: str = _require_https(os.environ.get("MAVEN_CENTRAL", "https://repo1.maven.org/maven2"), "MAVEN_CENTRAL")
 
 # Network settings
 REQUEST_TIMEOUT_SECONDS: int = int(os.environ.get("REQUEST_TIMEOUT_SECONDS", "30"))

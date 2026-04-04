@@ -45,8 +45,18 @@ def encode_scoped_package(pkg: str) -> str:
     """
     if pkg.startswith("@") and "/" in pkg:
         scope, name = pkg.split("/", 1)
-        return f"{quote(scope)}/{name}"
+        return f"{quote(scope)}/{quote(name)}"
     return quote(pkg)
+
+
+def _sanitize_headers(headers: dict) -> dict:
+    """Remove headers with CRLF sequences to prevent header injection."""
+    sanitized = {}
+    for k, v in headers.items():
+        if "\r" in str(k) or "\n" in str(k) or "\r" in str(v) or "\n" in str(v):
+            continue
+        sanitized[k] = v
+    return sanitized
 
 
 @router.post("/-/npm/v1/security/audits/quick")
@@ -94,7 +104,7 @@ async def npm_security_audit_quick(request: Request):
         except Exception:
             return {}
 
-    headers = await _extract_headers(request)
+    headers = _sanitize_headers(await _extract_headers(request))
     headers.pop("host", None)  # Remove host header
     if "content-type" not in headers:
         headers["content-type"] = "application/json"
@@ -174,7 +184,7 @@ async def npm_security_bulk(request: Request):
         except Exception:
             return {}
 
-    headers = await _extract_headers(request)
+    headers = _sanitize_headers(await _extract_headers(request))
     headers.pop("host", None)  # Remove host header
     if "content-type" not in headers:
         headers["content-type"] = "application/json"

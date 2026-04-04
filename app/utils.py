@@ -189,8 +189,8 @@ async def fetch_and_cache(
         try:
             if tmpname and os.path.exists(tmpname):
                 os.unlink(tmpname)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to clean up temp file %s: %s", tmpname, e)
 
 
 # ----------------------------------------------------------------------
@@ -249,10 +249,9 @@ async def conditional_file_response(
         logger.warning("Refused to serve file outside cache: %s", path)
         raise FileNotFoundError(path)
 
-    # Uncomment to refuse serving symlinks entirely
-    # if resolved.is_symlink():
-    #     logger.warning("Refused to serve symlink in cache: %s", resolved)
-    #     raise FileNotFoundError(resolved)
+    if resolved.is_symlink():
+        logger.warning("Refused to serve symlink in cache: %s", resolved)
+        raise FileNotFoundError(resolved)
 
     etag, last_modified = make_etag_and_last_modified(resolved)
     if_none_match = request.headers.get("if-none-match") or request.headers.get(
@@ -267,7 +266,8 @@ async def conditional_file_response(
 
     headers = file_headers(resolved)
     if attachment:
-        headers["Content-Disposition"] = f'attachment; filename="{resolved.name}"'
+        safe_filename = resolved.name.replace("\\", "").replace('"', "").replace("\r", "").replace("\n", "")
+        headers["Content-Disposition"] = f'attachment; filename="{safe_filename}"'
 
     content = open_cached_file(resolved)
     return Response(content=content, headers=headers, media_type=media_type)

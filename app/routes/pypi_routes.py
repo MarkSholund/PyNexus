@@ -17,10 +17,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote as urlquote
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timedelta
+import re
 import httpx
 import app.config as config
 import app.utils as utils
@@ -38,6 +39,16 @@ PYPI_UPSTREAM = "https://pypi.org"
 PYPI_CACHE = config.CACHE_DIR / "pypi"
 
 
+_SAFE_PATH_RE = re.compile(r'^[A-Za-z0-9_./-]+$')
+
+
+def _safe_path_suffix(suffix: str) -> str:
+    """Return suffix only if it contains safe characters, else raise ValueError."""
+    if not suffix or not _SAFE_PATH_RE.match(suffix) or ".." in suffix:
+        raise ValueError(f"Unsafe path suffix: {suffix!r}")
+    return suffix
+
+
 def rewrite_index_html(html: str, base_url: str) -> str:
     """Rewrite PyPI simple index links to route through proxy."""
     soup = BeautifulSoup(html, "html.parser")
@@ -47,22 +58,26 @@ def rewrite_index_html(html: str, base_url: str) -> str:
         parsed = urlparse(orig)
         new_href = orig
 
-        if parsed.scheme in ("http", "https"):
-            host = parsed.netloc.lower()
-            if host.endswith("files.pythonhosted.org") and "/packages/" in parsed.path:
-                suffix = parsed.path.split("/packages/", 1)[1]
-                new_href = f"{base_url}/packages/{suffix}"
-            elif host.endswith("pypi.org"):
-                path = parsed.path.lstrip("/")
-                new_href = f"{base_url}/{path}" if path else f"{base_url}/"
-        else:
-            # relative URL
-            rel = orig.lstrip("/")
-            if rel.startswith("packages/"):
-                suffix = rel[len("packages/"):]
-                new_href = f"{base_url}/packages/{suffix}"
-            elif rel.startswith("pypi/"):
-                new_href = f"{base_url}/{rel}"
+        try:
+            if parsed.scheme in ("http", "https"):
+                host = parsed.netloc.lower()
+                if host.endswith("files.pythonhosted.org") and "/packages/" in parsed.path:
+                    suffix = _safe_path_suffix(parsed.path.split("/packages/", 1)[1])
+                    new_href = f"{base_url}/packages/{suffix}"
+                elif host.endswith("pypi.org"):
+                    path = parsed.path.lstrip("/")
+                    new_href = f"{base_url}/{path}" if path else f"{base_url}/"
+            else:
+                # relative URL
+                rel = orig.lstrip("/")
+                if rel.startswith("packages/"):
+                    suffix = _safe_path_suffix(rel[len("packages/"):])
+                    new_href = f"{base_url}/packages/{suffix}"
+                elif rel.startswith("pypi/"):
+                    new_href = f"{base_url}/{rel}"
+        except ValueError:
+            # Drop links with unsafe path components
+            continue
 
         if parsed.query:
             new_href += f"?{parsed.query}"
