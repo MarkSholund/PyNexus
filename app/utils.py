@@ -249,9 +249,9 @@ async def conditional_file_response(
         logger.warning("Refused to serve file outside cache: %s", path)
         raise FileNotFoundError(path)
 
-    if resolved.is_symlink():
-        logger.warning("Refused to serve symlink in cache: %s", resolved)
-        raise FileNotFoundError(resolved)
+    if path.is_symlink():
+        logger.warning("Refused to serve symlink in cache: %s", path)
+        raise FileNotFoundError(path)
 
     etag, last_modified = make_etag_and_last_modified(resolved)
     if_none_match = request.headers.get("if-none-match") or request.headers.get(

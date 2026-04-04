@@ -76,7 +76,8 @@ def rewrite_index_html(html: str, base_url: str) -> str:
                 elif rel.startswith("pypi/"):
                     new_href = f"{base_url}/{rel}"
         except ValueError:
-            # Drop links with unsafe path components
+            # Remove links with unsafe path components entirely
+            a.decompose()
             continue
 
         if parsed.query:

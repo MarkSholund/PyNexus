@@ -422,3 +422,59 @@ async def test_pypi_package_version_json_cached(mock_fetch, mock_response):
         response = await pypi_routes.pypi_package_version_json("requests", "2.0.0", request_mock)
         mock_fetch.assert_not_called()
         mock_response.assert_called_once()
+
+
+# ========================================
+# Security fix tests
+# ========================================
+
+def test_safe_path_suffix_allows_valid():
+    """Valid path suffixes must pass through unchanged."""
+    assert pypi_routes._safe_path_suffix("ab/cd/file-1.0.whl") == "ab/cd/file-1.0.whl"
+    assert pypi_routes._safe_path_suffix("a1/b2/c3/pkg.tar.gz") == "a1/b2/c3/pkg.tar.gz"
+
+
+def test_safe_path_suffix_rejects_traversal():
+    """Path suffixes containing .. must be rejected."""
+    with pytest.raises(ValueError):
+        pypi_routes._safe_path_suffix("../../etc/passwd")
+
+
+def test_safe_path_suffix_rejects_special_chars():
+    """Path suffixes with shell-special characters must be rejected."""
+    with pytest.raises(ValueError):
+        pypi_routes._safe_path_suffix("pkg;rm -rf /")
+    with pytest.raises(ValueError):
+        pypi_routes._safe_path_suffix("pkg\x00null")
+
+
+def test_safe_path_suffix_rejects_empty():
+    """Empty suffix must be rejected."""
+    with pytest.raises(ValueError):
+        pypi_routes._safe_path_suffix("")
+
+
+def test_rewrite_index_html_drops_unsafe_suffixes():
+    """Links with unsafe path suffixes must be dropped from rewritten HTML."""
+    html = """
+    <html><body>
+      <a href="https://files.pythonhosted.org/packages/../../etc/passwd">evil</a>
+      <a href="https://files.pythonhosted.org/packages/good/file.whl">good</a>
+    </body></html>
+    """
+    rewritten = pypi_routes.rewrite_index_html(html, base_url="/pypi")
+    assert "etc/passwd" not in rewritten
+    assert "/packages/good/file.whl" in rewritten
+
+
+def test_rewrite_index_html_drops_special_char_suffixes():
+    """Links with shell-special chars in the path suffix must be dropped."""
+    html = """
+    <html><body>
+      <a href="https://files.pythonhosted.org/packages/pkg;evil">bad</a>
+      <a href="packages/normal-1.0.whl">ok</a>
+    </body></html>
+    """
+    rewritten = pypi_routes.rewrite_index_html(html, base_url="/pypi")
+    assert "pkg;evil" not in rewritten
+    assert "/packages/normal-1.0.whl" in rewritten

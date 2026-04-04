@@ -322,3 +322,61 @@ async def test_npm_package_tarball_fresh_cache(mock_fetch, mock_response, mock_s
         response = await npm_routes.npm_package_tarball(test_package, tarball, request=AsyncMock())
         mock_fetch.assert_not_called()
         mock_response.assert_called_once()
+
+
+# ========================================
+# Security fix tests
+# ========================================
+
+def test_sanitize_headers_strips_crlf_in_value():
+    """Headers with CRLF in values must be dropped."""
+    result = npm_routes._sanitize_headers({
+        "accept": "application/json",
+        "x-evil": "value\r\nX-Injected: yes",
+    })
+    assert "x-evil" not in result
+    assert "accept" in result
+
+
+def test_sanitize_headers_strips_crlf_in_key():
+    """Headers with CRLF in key names must be dropped."""
+    result = npm_routes._sanitize_headers({
+        "good-header": "ok",
+        "bad\r\nheader": "value",
+    })
+    assert "good-header" in result
+    assert len(result) == 1
+
+
+def test_sanitize_headers_strips_newline_only():
+    """Headers with lone \\n must also be dropped."""
+    result = npm_routes._sanitize_headers({
+        "x-newline": "val\nue",
+        "normal": "fine",
+    })
+    assert "x-newline" not in result
+    assert "normal" in result
+
+
+def test_sanitize_headers_passes_clean_headers():
+    """Clean headers must pass through unchanged."""
+    headers = {
+        "content-type": "application/json",
+        "authorization": "Bearer token123",
+        "x-request-id": "abc-123",
+    }
+    result = npm_routes._sanitize_headers(headers)
+    assert result == headers
+
+
+def test_encode_scoped_package_quotes_name():
+    """The name portion of scoped packages must also be URL-encoded."""
+    # name contains a space (edge case) — must be encoded
+    result = npm_routes.encode_scoped_package("@scope/name with space")
+    assert "name%20with%20space" in result or "name+with+space" in result
+
+
+def test_encode_scoped_package_normal_name_unchanged():
+    """Normal package names without special chars round-trip correctly."""
+    assert npm_routes.encode_scoped_package("@types/react") == "%40types/react"
+    assert npm_routes.encode_scoped_package("lodash") == "lodash"
