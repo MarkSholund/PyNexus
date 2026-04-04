@@ -18,7 +18,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 from fastapi import FastAPI
-from app.routes import pypi_routes, maven_routes, npm_routes
+from app.routes import pypi_routes, maven_routes, npm_routes, ui_routes
 import app.config as config
 import logging
 from contextlib import asynccontextmanager
@@ -36,6 +36,7 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(pypi_routes.router)
 app.include_router(maven_routes.router)
 app.include_router(npm_routes.router)
+app.include_router(ui_routes.router)
 
 
 @app.get("/")
