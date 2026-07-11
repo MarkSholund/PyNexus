@@ -23,11 +23,11 @@ def test_root_endpoint():
 # Test routers are included
 # -----------------------
 def test_routers_included():
-    routes = [r.path for r in main.app.routes]
-    # Check that at least one route from each router exists
-    assert any(r.startswith("/pypi") for r in routes)
-    assert any(r.startswith("/maven2") for r in routes)
-    assert any(r.startswith("/npm") for r in routes)
+    response = client.get("/openapi.json")
+    paths = response.json()["paths"]
+    assert any(p.startswith("/pypi") for p in paths)
+    assert any(p.startswith("/maven2") for p in paths)
+    assert any(p.startswith("/npm") for p in paths)
 
 
 # -----------------------
