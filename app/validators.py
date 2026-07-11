@@ -141,6 +141,49 @@ def validate_version_string(version: str) -> bool:
     return bool(re.match(pattern, version))
 
 
+def validate_pypi_artifact_path(path: str) -> bool:
+    """
+    Validate a PyPI package artifact path (the part after /pypi/packages/).
+
+    Rules:
+    - No path traversal, absolute paths, or null bytes
+    - No control characters (e.g. CR/LF), which could otherwise be used to
+      inject characters into the upstream request URL
+    - Only the charset actually used by pythonhosted.org paths is allowed:
+      letters, numbers, dots, hyphens, underscores, plus signs, slashes
+    - Length must be <= 1024 characters
+
+    Args:
+        path: Artifact path to validate
+
+    Returns:
+        True if valid, False otherwise
+
+    Examples:
+        >>> validate_pypi_artifact_path("aa/bb/cc.../requests-2.0.0-py3-none-any.whl")
+        True
+        >>> validate_pypi_artifact_path("../../../etc/passwd")
+        False
+    """
+    if not path or len(path) > 1024:
+        return False
+
+    # Check for path traversal and dangerous characters
+    if '..' in path or path.startswith('/') or '\\' in path or '\0' in path:
+        return False
+
+    # Only allow the charset actually used in pythonhosted.org paths.
+    # This also rejects control characters such as CR/LF.
+    pattern = r'^[a-zA-Z0-9._+/-]+$'
+    if not re.match(pattern, path):
+        return False
+
+    if '//' in path:
+        return False
+
+    return True
+
+
 def validate_maven_path(path: str) -> bool:
     """
     Validate Maven repository path format.

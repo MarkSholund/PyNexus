@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timedelta
@@ -27,6 +27,7 @@ import app.utils as utils
 
 from app.validators import (
     validate_pypi_package_name,
+    validate_pypi_artifact_path,
     validate_version_string,
     safe_join_path,
     ValidationError
@@ -134,6 +135,15 @@ async def pypi_package_index(package: str, request: Request):
 
 @router.get("/packages/{path:path}")
 async def pypi_artifact(path: str, request: Request):
+    # SECURITY: Validate artifact path charset (also rejects CR/LF and other
+    # control characters that could otherwise be smuggled into the upstream
+    # request URL below).
+    if not validate_pypi_artifact_path(path):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid PyPI artifact path: {path}"
+        )
+
     try:
         local_path = utils.safe_cache_path(PYPI_CACHE, "packages", path)
     except ValueError as e:
@@ -143,7 +153,8 @@ async def pypi_artifact(path: str, request: Request):
         upstream_path = path
         if upstream_path.startswith("packages/"):
             upstream_path = upstream_path[len("packages/"):]
-        await utils.fetch_and_cache(f"https://files.pythonhosted.org/packages/{upstream_path}", local_path)
+        upstream_url = f"https://files.pythonhosted.org/packages/{quote(upstream_path, safe='/')}"
+        await utils.fetch_and_cache(upstream_url, local_path)
 
     try:
         attachment = local_path.suffix in [".whl", ".zip", ".gz", ".tar"]

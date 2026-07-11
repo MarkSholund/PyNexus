@@ -31,6 +31,16 @@ def test_routers_included():
 
 
 # -----------------------
+# Test MaxBodySizeMiddleware wiring
+# -----------------------
+def test_max_body_size_middleware_registered():
+    from app.middleware import MaxBodySizeMiddleware
+
+    classes = [mw.cls for mw in main.app.user_middleware]
+    assert MaxBodySizeMiddleware in classes
+
+
+# -----------------------
 # Test lifespan logging (Windows-compatible)
 # -----------------------
 @pytest.mark.asyncio

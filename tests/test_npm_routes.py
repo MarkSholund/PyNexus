@@ -173,6 +173,60 @@ async def test_npm_security_bulk_stale_refresh(mock_fetch, mock_stale):
 
 
 @pytest.mark.asyncio
+@patch("app.routes.npm_routes.utils.conditional_file_response", new_callable=AsyncMock)
+@patch("app.routes.npm_routes.utils.fetch_and_cache", new_callable=AsyncMock)
+async def test_npm_security_bulk_strips_hop_by_hop_headers(mock_fetch, mock_response):
+    """Hop-by-hop headers must not be forwarded to the upstream registry."""
+    body = b'{"advisories":[]}'
+    request_mock = AsyncMock()
+    request_mock.body.return_value = body
+    request_mock.headers = {
+        "host": "attacker.example",
+        "content-length": "9999",
+        "transfer-encoding": "chunked",
+        "connection": "keep-alive",
+        "x-custom-header": "keep-me",
+    }
+
+    with patch.object(Path, "exists", return_value=False):
+        mock_fetch.return_value = {"result": "ok"}
+        await npm_routes.npm_security_bulk(request_mock)
+
+        mock_fetch.assert_called_once()
+        forwarded_headers = mock_fetch.call_args.kwargs["headers"]
+        for hop in ("host", "content-length", "transfer-encoding", "connection"):
+            assert hop not in forwarded_headers
+        assert forwarded_headers["x-custom-header"] == "keep-me"
+        assert forwarded_headers["content-type"] == "application/json"
+
+
+@pytest.mark.asyncio
+@patch("app.routes.npm_routes.utils.conditional_file_response", new_callable=AsyncMock)
+@patch("app.routes.npm_routes.utils.fetch_and_cache", new_callable=AsyncMock)
+async def test_npm_security_audit_quick_strips_hop_by_hop_headers(mock_fetch, mock_response):
+    """Hop-by-hop headers must not be forwarded to the upstream registry."""
+    body = b'{"name":"lodash"}'
+    request_mock = AsyncMock()
+    request_mock.body.return_value = body
+    request_mock.headers = {
+        "host": "attacker.example",
+        "content-length": "9999",
+        "transfer-encoding": "chunked",
+        "x-custom-header": "keep-me",
+    }
+
+    with patch.object(Path, "exists", return_value=False):
+        mock_fetch.return_value = {"result": "ok"}
+        await npm_routes.npm_security_audit_quick(request_mock)
+
+        mock_fetch.assert_called_once()
+        forwarded_headers = mock_fetch.call_args.kwargs["headers"]
+        for hop in ("host", "content-length", "transfer-encoding"):
+            assert hop not in forwarded_headers
+        assert forwarded_headers["x-custom-header"] == "keep-me"
+
+
+@pytest.mark.asyncio
 async def test_npm_package_metadata_rejects_absolute_path():
     with pytest.raises(HTTPException) as exc_info:
         await npm_routes.npm_package_metadata("/etc/passwd", request=AsyncMock())

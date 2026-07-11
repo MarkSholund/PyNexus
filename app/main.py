@@ -19,6 +19,7 @@
 
 from fastapi import FastAPI
 from app.routes import pypi_routes, maven_routes, npm_routes
+from app.middleware import MaxBodySizeMiddleware
 import app.config as config
 import logging
 from contextlib import asynccontextmanager
@@ -33,6 +34,8 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down FastAPI app")
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(MaxBodySizeMiddleware,
+                    max_bytes=config.MAX_REQUEST_BODY_BYTES)
 app.include_router(pypi_routes.router)
 app.include_router(maven_routes.router)
 app.include_router(npm_routes.router)

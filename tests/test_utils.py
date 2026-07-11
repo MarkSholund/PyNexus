@@ -133,6 +133,41 @@ async def test_conditional_file_response_304(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_conditional_file_response_rejects_symlink(tmp_path):
+    """A symlink under the cache dir must never be served, even if its
+    target resolves to somewhere inside the cache root."""
+    real_file = tmp_path / "real.txt"
+    real_file.write_text("secret-ish content")
+
+    link_path = tmp_path / "link.txt"
+    link_path.symlink_to(real_file)
+
+    request = MagicMock()
+    request.headers = {}
+
+    with pytest.raises(FileNotFoundError):
+        await utils.conditional_file_response(request, link_path, "text/plain")
+
+
+@pytest.mark.asyncio
+async def test_conditional_file_response_rejects_symlink_escaping_cache(tmp_path):
+    """A symlink pointing outside the cache root must be refused."""
+    outside_dir = tmp_path.parent / "outside_secret"
+    outside_dir.mkdir(exist_ok=True)
+    outside_file = outside_dir / "passwd.txt"
+    outside_file.write_text("root:x:0:0")
+
+    link_path = tmp_path / "escape.txt"
+    link_path.symlink_to(outside_file)
+
+    request = MagicMock()
+    request.headers = {}
+
+    with pytest.raises(FileNotFoundError):
+        await utils.conditional_file_response(request, link_path, "text/plain")
+
+
+@pytest.mark.asyncio
 async def test_conditional_file_response_rejects_outside_cache(tmp_path):
     file_path = tmp_path.parent / "outside.txt"
     file_path.write_text("abc")

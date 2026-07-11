@@ -236,9 +236,17 @@ async def conditional_file_response(
 
     Additional safety:
     - Re-verify path is inside configured cache directory before serving.
-    - Optionally refuse serving symlinks (disabled by default).
+    - Refuse serving symlinks: nothing in this app creates symlinks under
+      the cache dir, so any symlink found there is unexpected.
     """
     if not path.exists():
+        raise FileNotFoundError(path)
+
+    # SECURITY: check the pre-resolution path for a symlink; path.resolve()
+    # below follows symlinks to their real target, so checking is_symlink()
+    # on the *resolved* path would always be False and miss this case.
+    if path.is_symlink():
+        logger.warning("Refused to serve symlink in cache: %s", path)
         raise FileNotFoundError(path)
 
     cache_root = config.CACHE_DIR.resolve()
@@ -248,11 +256,6 @@ async def conditional_file_response(
     except Exception:
         logger.warning("Refused to serve file outside cache: %s", path)
         raise FileNotFoundError(path)
-
-    # Uncomment to refuse serving symlinks entirely
-    # if resolved.is_symlink():
-    #     logger.warning("Refused to serve symlink in cache: %s", resolved)
-    #     raise FileNotFoundError(resolved)
 
     etag, last_modified = make_etag_and_last_modified(resolved)
     if_none_match = request.headers.get("if-none-match") or request.headers.get(

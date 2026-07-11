@@ -21,6 +21,7 @@ import pytest
 from app.validators import (
     validate_npm_package_name,
     validate_pypi_package_name,
+    validate_pypi_artifact_path,
     validate_maven_path,
     validate_version_string,
     safe_join_path,
@@ -57,6 +58,42 @@ class TestPyPIValidation:
         assert not validate_pypi_package_name("/etc/passwd")
         assert not validate_pypi_package_name("package\0name")
         assert not validate_pypi_package_name("")
+
+
+class TestPyPIArtifactPathValidation:
+    def test_valid_artifact_paths(self):
+        assert validate_pypi_artifact_path(
+            "aa/bb/cccccccccccccccccccccccccccccccc/requests-2.0.0-py3-none-any.whl")
+        assert validate_pypi_artifact_path("somepackage/file.whl")
+        assert validate_pypi_artifact_path(
+            "requests/requests-2.0.0+local.tar.gz")
+
+    def test_rejects_traversal_and_absolute(self):
+        assert not validate_pypi_artifact_path("../../../etc/passwd")
+        assert not validate_pypi_artifact_path("/etc/passwd")
+        assert not validate_pypi_artifact_path("a/../../b")
+        assert not validate_pypi_artifact_path("..\\windows\\system32")
+
+    def test_rejects_null_byte(self):
+        assert not validate_pypi_artifact_path("file\0name.whl")
+
+    def test_rejects_control_characters(self):
+        # CR/LF and other control chars must not be smuggled into the
+        # upstream request URL.
+        assert not validate_pypi_artifact_path("file\r\nX-Injected: 1")
+        assert not validate_pypi_artifact_path("file\nname.whl")
+
+    def test_rejects_double_slash(self):
+        assert not validate_pypi_artifact_path("a//b")
+
+    def test_rejects_empty_and_too_long(self):
+        assert not validate_pypi_artifact_path("")
+        assert not validate_pypi_artifact_path("a" * 1025)
+
+    def test_rejects_disallowed_characters(self):
+        assert not validate_pypi_artifact_path("a/b?query=1")
+        assert not validate_pypi_artifact_path("a/b#frag")
+        assert not validate_pypi_artifact_path("a/b c")
 
 
 class TestMavenValidation:

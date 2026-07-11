@@ -48,3 +48,9 @@ MAVEN_CENTRAL: str = os.environ.get("MAVEN_CENTRAL", "https://repo1.maven.org/ma
 # Network settings
 REQUEST_TIMEOUT_SECONDS: int = int(os.environ.get("REQUEST_TIMEOUT_SECONDS", "30"))
 MAX_RETRIES: int = int(os.environ.get("MAX_RETRIES", "3"))
+
+# Maximum accepted size (in bytes) of any incoming request body (enforced by
+# MaxBodySizeMiddleware). Prevents unauthenticated memory-exhaustion DoS via
+# oversized POST bodies (e.g. npm audit/bulk endpoints, which buffer the
+# entire body to hash and forward upstream).
+MAX_REQUEST_BODY_BYTES: int = int(os.environ.get("MAX_REQUEST_BODY_BYTES", str(5 * 1024 * 1024)))

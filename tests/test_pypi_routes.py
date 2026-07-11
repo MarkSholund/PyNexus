@@ -422,3 +422,42 @@ async def test_pypi_package_version_json_cached(mock_fetch, mock_response):
         response = await pypi_routes.pypi_package_version_json("requests", "2.0.0", request_mock)
         mock_fetch.assert_not_called()
         mock_response.assert_called_once()
+
+
+# ------------------------------------------------------------------
+# SECURITY: artifact path charset validation + upstream URL quoting
+# ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pypi_artifact_rejects_control_characters():
+    """CR/LF and other control chars must be rejected before being used
+    to build the upstream request URL."""
+    request_mock = AsyncMock()
+    with pytest.raises(HTTPException) as exc_info:
+        await pypi_routes.pypi_artifact("packages/foo\r\nX-Injected: 1", request_mock)
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_pypi_artifact_rejects_disallowed_characters():
+    request_mock = AsyncMock()
+    with pytest.raises(HTTPException) as exc_info:
+        await pypi_routes.pypi_artifact("somepackage/file whl?evil=1", request_mock)
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+@patch("app.routes.pypi_routes.utils.conditional_file_response", new_callable=AsyncMock)
+@patch("app.routes.pypi_routes.utils.fetch_and_cache", new_callable=AsyncMock)
+async def test_pypi_artifact_quotes_upstream_url(mock_fetch, mock_response):
+    """Special characters in an otherwise-valid path must be percent-encoded
+    before being interpolated into the upstream URL."""
+    path = "aa/bb/requests-2.0.0+local.whl"
+    with patch.object(Path, "exists", return_value=False):
+        mock_response.return_value = b"wheel data"
+        request_mock = AsyncMock()
+        await pypi_routes.pypi_artifact(path, request_mock)
+
+        mock_fetch.assert_called_once()
+        called_url = mock_fetch.call_args[0][0]
+        assert called_url == "https://files.pythonhosted.org/packages/aa/bb/requests-2.0.0%2Blocal.whl"
