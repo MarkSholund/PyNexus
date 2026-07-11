@@ -36,28 +36,6 @@ NPM_CACHE = config.CACHE_DIR / "npm"
 
 router = APIRouter(prefix="/npm", tags=["npm"])
 
-# Hop-by-hop / connection-specific headers must not be forwarded verbatim to
-# the upstream registry: httpx computes its own content-length and framing
-# for the outgoing request, so forwarding the client's original values for
-# these risks request smuggling / mismatched framing upstream.
-_HOP_BY_HOP_HEADERS = frozenset({
-    "host",
-    "content-length",
-    "transfer-encoding",
-    "connection",
-    "keep-alive",
-    "upgrade",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-})
-
-
-def _strip_hop_by_hop_headers(headers: dict) -> dict:
-    """Remove hop-by-hop headers before forwarding to the upstream registry."""
-    return {k: v for k, v in headers.items() if k.lower() not in _HOP_BY_HOP_HEADERS}
-
 
 def encode_scoped_package(pkg: str) -> str:
     """
@@ -117,7 +95,8 @@ async def npm_security_audit_quick(request: Request):
             return {}
 
     headers = await _extract_headers(request)
-    headers = _strip_hop_by_hop_headers(headers)
+    # Hop-by-hop headers (Host, Content-Length, etc.) are stripped inside
+    # utils.fetch_and_cache before forwarding to the upstream registry.
     if "content-type" not in headers:
         headers["content-type"] = "application/json"
 
@@ -197,7 +176,8 @@ async def npm_security_bulk(request: Request):
             return {}
 
     headers = await _extract_headers(request)
-    headers = _strip_hop_by_hop_headers(headers)
+    # Hop-by-hop headers (Host, Content-Length, etc.) are stripped inside
+    # utils.fetch_and_cache before forwarding to the upstream registry.
     if "content-type" not in headers:
         headers["content-type"] = "application/json"
 

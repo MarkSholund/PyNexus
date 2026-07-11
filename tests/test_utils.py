@@ -178,8 +178,67 @@ async def test_conditional_file_response_rejects_outside_cache(tmp_path):
 
 
 # ------------------------
+# strip_hop_by_hop_headers
+# ------------------------
+
+def test_strip_hop_by_hop_headers_removes_known_headers():
+    headers = {
+        "Host": "attacker.example",
+        "Content-Length": "9999",
+        "Transfer-Encoding": "chunked",
+        "Connection": "keep-alive",
+        "x-custom-header": "keep-me",
+    }
+    result = utils.strip_hop_by_hop_headers(headers)
+    assert result == {"x-custom-header": "keep-me"}
+
+
+def test_strip_hop_by_hop_headers_case_insensitive():
+    headers = {"HOST": "attacker.example", "X-Kept": "1"}
+    result = utils.strip_hop_by_hop_headers(headers)
+    assert result == {"X-Kept": "1"}
+
+
+def test_strip_hop_by_hop_headers_empty_dict():
+    assert utils.strip_hop_by_hop_headers({}) == {}
+
+
+# ------------------------
 # fetch_and_cache
 # ------------------------
+
+@pytest.mark.asyncio
+async def test_fetch_and_cache_strips_hop_by_hop_headers_before_upstream_call(monkeypatch, tmp_path):
+    """fetch_and_cache is the shared chokepoint for every outbound registry
+    request (pypi/npm/maven); it must strip hop-by-hop headers itself so any
+    caller forwarding client headers is protected automatically."""
+    url = "http://example.com/data.txt"
+    dest = tmp_path / "data.txt"
+
+    mock_client = AsyncMock()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.content = b"abc"
+    mock_resp.raise_for_status = MagicMock()
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.get.return_value = mock_resp
+    monkeypatch.setattr(utils.httpx, "AsyncClient", lambda **_: mock_client)
+
+    await utils.fetch_and_cache(
+        url,
+        dest,
+        headers={
+            "host": "attacker.example",
+            "content-length": "9999",
+            "x-custom-header": "keep-me",
+        },
+    )
+
+    sent_headers = mock_client.get.call_args.kwargs["headers"]
+    assert "host" not in sent_headers
+    assert "content-length" not in sent_headers
+    assert sent_headers["x-custom-header"] == "keep-me"
+
 
 @pytest.mark.asyncio
 async def test_fetch_and_cache_get_bytes(monkeypatch, tmp_path):

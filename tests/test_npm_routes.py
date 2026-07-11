@@ -175,16 +175,15 @@ async def test_npm_security_bulk_stale_refresh(mock_fetch, mock_stale):
 @pytest.mark.asyncio
 @patch("app.routes.npm_routes.utils.conditional_file_response", new_callable=AsyncMock)
 @patch("app.routes.npm_routes.utils.fetch_and_cache", new_callable=AsyncMock)
-async def test_npm_security_bulk_strips_hop_by_hop_headers(mock_fetch, mock_response):
-    """Hop-by-hop headers must not be forwarded to the upstream registry."""
+async def test_npm_security_bulk_forwards_headers_and_content_type_default(mock_fetch, mock_response):
+    """Extracted headers (plus a default content-type) reach fetch_and_cache,
+    which is responsible for stripping hop-by-hop headers before forwarding
+    upstream (see test_utils.py for that coverage)."""
     body = b'{"advisories":[]}'
     request_mock = AsyncMock()
     request_mock.body.return_value = body
     request_mock.headers = {
         "host": "attacker.example",
-        "content-length": "9999",
-        "transfer-encoding": "chunked",
-        "connection": "keep-alive",
         "x-custom-header": "keep-me",
     }
 
@@ -194,8 +193,6 @@ async def test_npm_security_bulk_strips_hop_by_hop_headers(mock_fetch, mock_resp
 
         mock_fetch.assert_called_once()
         forwarded_headers = mock_fetch.call_args.kwargs["headers"]
-        for hop in ("host", "content-length", "transfer-encoding", "connection"):
-            assert hop not in forwarded_headers
         assert forwarded_headers["x-custom-header"] == "keep-me"
         assert forwarded_headers["content-type"] == "application/json"
 
@@ -203,15 +200,15 @@ async def test_npm_security_bulk_strips_hop_by_hop_headers(mock_fetch, mock_resp
 @pytest.mark.asyncio
 @patch("app.routes.npm_routes.utils.conditional_file_response", new_callable=AsyncMock)
 @patch("app.routes.npm_routes.utils.fetch_and_cache", new_callable=AsyncMock)
-async def test_npm_security_audit_quick_strips_hop_by_hop_headers(mock_fetch, mock_response):
-    """Hop-by-hop headers must not be forwarded to the upstream registry."""
+async def test_npm_security_audit_quick_forwards_headers_and_content_type_default(mock_fetch, mock_response):
+    """Extracted headers (plus a default content-type) reach fetch_and_cache,
+    which is responsible for stripping hop-by-hop headers before forwarding
+    upstream (see test_utils.py for that coverage)."""
     body = b'{"name":"lodash"}'
     request_mock = AsyncMock()
     request_mock.body.return_value = body
     request_mock.headers = {
         "host": "attacker.example",
-        "content-length": "9999",
-        "transfer-encoding": "chunked",
         "x-custom-header": "keep-me",
     }
 
@@ -221,9 +218,8 @@ async def test_npm_security_audit_quick_strips_hop_by_hop_headers(mock_fetch, mo
 
         mock_fetch.assert_called_once()
         forwarded_headers = mock_fetch.call_args.kwargs["headers"]
-        for hop in ("host", "content-length", "transfer-encoding"):
-            assert hop not in forwarded_headers
         assert forwarded_headers["x-custom-header"] == "keep-me"
+        assert forwarded_headers["content-type"] == "application/json"
 
 
 @pytest.mark.asyncio

@@ -160,7 +160,7 @@ def validate_pypi_artifact_path(path: str) -> bool:
         True if valid, False otherwise
 
     Examples:
-        >>> validate_pypi_artifact_path("aa/bb/cc.../requests-2.0.0-py3-none-any.whl")
+        >>> validate_pypi_artifact_path("aa/bb/requests-2.0.0-py3-none-any.whl")
         True
         >>> validate_pypi_artifact_path("../../../etc/passwd")
         False

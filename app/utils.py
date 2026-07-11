@@ -92,6 +92,31 @@ def safe_cache_path(cache_root: Path, *parts: Iterable[str]) -> Path:
 # Network fetch + local caching (atomic, safe)
 # ----------------------------------------------------------------------
 
+# Hop-by-hop / connection-specific headers must never be forwarded verbatim
+# to an upstream server: httpx computes its own framing (content-length,
+# connection handling) for the outgoing request, so passing through a
+# caller's original values risks request smuggling / mismatched framing
+# upstream. Centralized here since fetch_and_cache is the single chokepoint
+# every outbound registry request (pypi/npm/maven) goes through, so any
+# caller that forwards client-supplied headers is protected automatically.
+_HOP_BY_HOP_HEADERS = frozenset({
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "keep-alive",
+    "upgrade",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+})
+
+
+def strip_hop_by_hop_headers(headers: dict) -> dict:
+    """Remove hop-by-hop headers before forwarding to an upstream server."""
+    return {k: v for k, v in headers.items() if k.lower() not in _HOP_BY_HOP_HEADERS}
+
 
 async def fetch_and_cache(
     url: str,
@@ -142,7 +167,7 @@ async def fetch_and_cache(
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     # Prepare headers with defaults
-    request_headers = headers.copy() if headers else {}
+    request_headers = strip_hop_by_hop_headers(headers) if headers else {}
     if "user-agent" not in request_headers:
         request_headers["user-agent"] = "fastapi-nexus-proxy/1.0"
 
