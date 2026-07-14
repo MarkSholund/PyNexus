@@ -17,20 +17,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-from urllib.parse import urlparse, quote
+from datetime import datetime, timedelta
+from urllib.parse import quote, urlparse
+
+import httpx2
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, Request
-from datetime import datetime, timedelta
-import httpx
+
 import app.config as config
 import app.utils as utils
-
 from app.validators import (
-    validate_pypi_package_name,
-    validate_pypi_artifact_path,
-    validate_version_string,
+    ValidationError,
     safe_join_path,
-    ValidationError
+    validate_pypi_artifact_path,
+    validate_pypi_package_name,
+    validate_version_string,
 )
 
 router = APIRouter(prefix="/pypi", tags=["PyPI"])
@@ -60,7 +61,7 @@ def rewrite_index_html(html: str, base_url: str) -> str:
             # relative URL
             rel = orig.lstrip("/")
             if rel.startswith("packages/"):
-                suffix = rel[len("packages/"):]
+                suffix = rel[len("packages/") :]
                 new_href = f"{base_url}/packages/{suffix}"
             elif rel.startswith("pypi/"):
                 new_href = f"{base_url}/{rel}"
@@ -81,7 +82,7 @@ async def pypi_root_index(request: Request):
 
     # Check if cache is stale (older than 24 hours)
     if utils.is_cache_stale(local_path, max_age_hours=config.PYPI_METADATA_TTL_HOURS):
-        async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client:
+        async with httpx2.AsyncClient(follow_redirects=True, timeout=60.0) as client:
             r = await client.get(f"{PYPI_UPSTREAM}/simple/")
             if r.status_code != 200:
                 raise HTTPException(status_code=r.status_code)
@@ -102,13 +103,11 @@ async def pypi_package_index(package: str, request: Request):
     # SECURITY: Validate package name
     if not validate_pypi_package_name(package):
         raise HTTPException(
-            status_code=400,
-            detail=f"Invalid PyPI package name: {package}"
+            status_code=400, detail=f"Invalid PyPI package name: {package}"
         )
 
     try:
-        local_path = safe_join_path(
-            PYPI_CACHE, "simple", package, "index.html")
+        local_path = safe_join_path(PYPI_CACHE, "simple", package, "index.html")
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -116,7 +115,9 @@ async def pypi_package_index(package: str, request: Request):
     if utils.is_cache_stale(local_path, config.PYPI_METADATA_TTL_HOURS):
         url = f"{PYPI_UPSTREAM}/simple/{package}/"
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client:
+            async with httpx2.AsyncClient(
+                follow_redirects=True, timeout=60.0
+            ) as client:
                 r = await client.get(url)
                 if r.status_code == 200:
                     rewritten = rewrite_index_html(r.text, base_url="/pypi")
@@ -124,11 +125,10 @@ async def pypi_package_index(package: str, request: Request):
                     local_path.write_text(rewritten, encoding="utf-8")
                 elif not local_path.exists():
                     raise HTTPException(status_code=r.status_code)
-        except httpx.RequestError:
+        except httpx2.RequestError:
             # Network error - serve stale cache if available
             if not local_path.exists():
-                raise HTTPException(
-                    status_code=503, detail="Upstream unavailable")
+                raise HTTPException(status_code=503, detail="Upstream unavailable")
 
     return await utils.conditional_file_response(request, local_path, "text/html")
 
@@ -140,8 +140,7 @@ async def pypi_artifact(path: str, request: Request):
     # request URL below).
     if not validate_pypi_artifact_path(path):
         raise HTTPException(
-            status_code=400,
-            detail=f"Invalid PyPI artifact path: {path}"
+            status_code=400, detail=f"Invalid PyPI artifact path: {path}"
         )
 
     try:
@@ -152,13 +151,17 @@ async def pypi_artifact(path: str, request: Request):
     if not local_path.exists():
         upstream_path = path
         if upstream_path.startswith("packages/"):
-            upstream_path = upstream_path[len("packages/"):]
-        upstream_url = f"https://files.pythonhosted.org/packages/{quote(upstream_path, safe='/')}"
+            upstream_path = upstream_path[len("packages/") :]
+        upstream_url = (
+            f"https://files.pythonhosted.org/packages/{quote(upstream_path, safe='/')}"
+        )
         await utils.fetch_and_cache(upstream_url, local_path)
 
     try:
         attachment = local_path.suffix in [".whl", ".zip", ".gz", ".tar"]
-        return await utils.conditional_file_response(request, local_path, "application/octet-stream", attachment=attachment)
+        return await utils.conditional_file_response(
+            request, local_path, "application/octet-stream", attachment=attachment
+        )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Artifact not found")
 
@@ -168,8 +171,7 @@ async def pypi_package_json(package: str, request: Request):
     # SECURITY: Validate package name
     if not validate_pypi_package_name(package):
         raise HTTPException(
-            status_code=400,
-            detail=f"Invalid PyPI package name: {package}"
+            status_code=400, detail=f"Invalid PyPI package name: {package}"
         )
 
     try:
@@ -180,7 +182,9 @@ async def pypi_package_json(package: str, request: Request):
     if not local_path.exists():
         await utils.fetch_and_cache(f"{PYPI_UPSTREAM}/pypi/{package}/json", local_path)
 
-    return await utils.conditional_file_response(request, local_path, "application/json")
+    return await utils.conditional_file_response(
+        request, local_path, "application/json"
+    )
 
 
 @router.get("/{package}/{version}/json")
@@ -188,14 +192,12 @@ async def pypi_package_version_json(package: str, version: str, request: Request
     # SECURITY: Validate package name and version
     if not validate_pypi_package_name(package):
         raise HTTPException(
-            status_code=400,
-            detail=f"Invalid PyPI package name: {package}"
+            status_code=400, detail=f"Invalid PyPI package name: {package}"
         )
 
     if not validate_version_string(version):
         raise HTTPException(
-            status_code=400,
-            detail=f"Invalid version string: {version}"
+            status_code=400, detail=f"Invalid version string: {version}"
         )
 
     try:
@@ -204,6 +206,10 @@ async def pypi_package_version_json(package: str, version: str, request: Request
         raise HTTPException(status_code=400, detail=str(e))
 
     if not local_path.exists():
-        await utils.fetch_and_cache(f"{PYPI_UPSTREAM}/pypi/{package}/{version}/json", local_path)
+        await utils.fetch_and_cache(
+            f"{PYPI_UPSTREAM}/pypi/{package}/{version}/json", local_path
+        )
 
-    return await utils.conditional_file_response(request, local_path, "application/json")
+    return await utils.conditional_file_response(
+        request, local_path, "application/json"
+    )

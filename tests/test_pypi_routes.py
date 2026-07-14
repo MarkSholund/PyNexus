@@ -17,10 +17,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from fastapi import HTTPException
-from unittest.mock import AsyncMock, patch
-from pathlib import Path
+
 from app.routes import pypi_routes
 
 client = AsyncMock()
@@ -49,9 +51,10 @@ def test_rewrite_index_html_relative_and_absolute():
 # Endpoint tests
 # -----------------------
 
+
 @pytest.mark.asyncio
 @patch("app.routes.pypi_routes.utils.conditional_file_response", new_callable=AsyncMock)
-@patch("app.routes.pypi_routes.httpx.AsyncClient.get", new_callable=AsyncMock)
+@patch("app.routes.pypi_routes.httpx2.AsyncClient.get", new_callable=AsyncMock)
 async def test_pypi_root_index_fetch(mock_get, mock_response):
     with patch.object(Path, "exists", return_value=False):
         mock_get.return_value.status_code = 200
@@ -65,7 +68,7 @@ async def test_pypi_root_index_fetch(mock_get, mock_response):
 
 @pytest.mark.asyncio
 @patch("app.routes.pypi_routes.utils.conditional_file_response", new_callable=AsyncMock)
-@patch("app.routes.pypi_routes.httpx.AsyncClient.get", new_callable=AsyncMock)
+@patch("app.routes.pypi_routes.httpx2.AsyncClient.get", new_callable=AsyncMock)
 async def test_pypi_package_index_fetch(mock_get, mock_response):
     package = "example"
     with patch.object(Path, "exists", return_value=False):
@@ -126,7 +129,9 @@ async def test_pypi_package_version_json_fetch(mock_fetch, mock_response):
     with patch.object(Path, "exists", return_value=False):
         mock_response.return_value = {"json": True}
         request_mock = AsyncMock()
-        response = await pypi_routes.pypi_package_version_json(package, version, request_mock)
+        response = await pypi_routes.pypi_package_version_json(
+            package, version, request_mock
+        )
         mock_fetch.assert_called_once()
         mock_response.assert_called_once()
 
@@ -134,6 +139,7 @@ async def test_pypi_package_version_json_fetch(mock_fetch, mock_response):
 # -----------------------
 # Security tests (path traversal)
 # -----------------------
+
 
 @pytest.mark.asyncio
 async def test_pypi_package_index_rejects_absolute_path():
@@ -163,11 +169,14 @@ async def test_pypi_package_json_rejects_traversal():
 # Additional Coverage Tests
 # ========================================
 
+
 @pytest.mark.asyncio
 @patch("app.routes.pypi_routes.utils.is_cache_stale", return_value=True)
 @patch("app.routes.pypi_routes.utils.conditional_file_response", new_callable=AsyncMock)
-@patch("app.routes.pypi_routes.httpx.AsyncClient")
-async def test_pypi_root_index_stale_refresh(mock_client_cls, mock_response, mock_stale):
+@patch("app.routes.pypi_routes.httpx2.AsyncClient")
+async def test_pypi_root_index_stale_refresh(
+    mock_client_cls, mock_response, mock_stale
+):
     """Test that stale PyPI root index is refreshed."""
     mock_client = AsyncMock()
     mock_get_resp = AsyncMock()
@@ -177,10 +186,10 @@ async def test_pypi_root_index_stale_refresh(mock_client_cls, mock_response, moc
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
     mock_client_cls.return_value = mock_client
-    
+
     mock_response.return_value = b"content"
     request_mock = AsyncMock()
-    
+
     with patch.object(Path, "exists", return_value=True):
         response = await pypi_routes.pypi_root_index(request_mock)
         mock_client.get.assert_called_once()
@@ -194,7 +203,7 @@ async def test_pypi_root_index_fresh_cache(mock_response, mock_stale):
     """Test that fresh PyPI root index is served from cache."""
     mock_response.return_value = b"cached content"
     request_mock = AsyncMock()
-    
+
     with patch.object(Path, "exists", return_value=True):
         response = await pypi_routes.pypi_root_index(request_mock)
         mock_response.assert_called_once()
@@ -207,7 +216,7 @@ async def test_pypi_package_index_fresh_cache(mock_response, mock_stale):
     """Test that fresh package index is served from cache."""
     mock_response.return_value = b"package index"
     request_mock = AsyncMock()
-    
+
     with patch.object(Path, "exists", return_value=True):
         response = await pypi_routes.pypi_package_index("requests", request_mock)
         mock_response.assert_called_once()
@@ -217,9 +226,11 @@ async def test_pypi_package_index_fresh_cache(mock_response, mock_stale):
 async def test_pypi_root_index_raises_validation_error():
     """Test that ValidationError from utils.safe_cache_path is handled."""
     from app.validators import ValidationError
-    
-    with patch("app.routes.pypi_routes.utils.safe_cache_path", 
-               side_effect=ValidationError("Invalid path")):
+
+    with patch(
+        "app.routes.pypi_routes.utils.safe_cache_path",
+        side_effect=ValidationError("Invalid path"),
+    ):
         request_mock = AsyncMock()
         with pytest.raises(ValidationError):
             await pypi_routes.pypi_root_index(request_mock)
@@ -229,9 +240,11 @@ async def test_pypi_root_index_raises_validation_error():
 async def test_pypi_package_index_raises_validation_error():
     """Test that ValidationError from safe_cache_path is handled."""
     from app.validators import ValidationError
-    
-    with patch("app.routes.pypi_routes.safe_join_path", 
-               side_effect=ValidationError("Invalid path")):
+
+    with patch(
+        "app.routes.pypi_routes.safe_join_path",
+        side_effect=ValidationError("Invalid path"),
+    ):
         request_mock = AsyncMock()
         with pytest.raises(HTTPException) as exc_info:
             await pypi_routes.pypi_package_index("requests", request_mock)
@@ -242,9 +255,11 @@ async def test_pypi_package_index_raises_validation_error():
 async def test_pypi_artifact_raises_validation_error():
     """Test that ValidationError from safe_join_path raises HTTPException(400)."""
     from app.validators import ValidationError
-    
-    with patch("app.routes.pypi_routes.safe_join_path", 
-               side_effect=ValidationError("Invalid path")):
+
+    with patch(
+        "app.routes.pypi_routes.safe_join_path",
+        side_effect=ValidationError("Invalid path"),
+    ):
         request_mock = AsyncMock()
         with pytest.raises(HTTPException) as exc_info:
             await pypi_routes.pypi_artifact("requests/file.whl", request_mock)
@@ -256,9 +271,11 @@ async def test_pypi_artifact_raises_validation_error():
 async def test_pypi_package_json_raises_validation_error():
     """Test that ValidationError from safe_join_path is handled."""
     from app.validators import ValidationError
-    
-    with patch("app.routes.pypi_routes.safe_join_path", 
-               side_effect=ValidationError("Invalid path")):
+
+    with patch(
+        "app.routes.pypi_routes.safe_join_path",
+        side_effect=ValidationError("Invalid path"),
+    ):
         request_mock = AsyncMock()
         with pytest.raises(HTTPException) as exc_info:
             await pypi_routes.pypi_package_json("requests", request_mock)
@@ -269,18 +286,21 @@ async def test_pypi_package_json_raises_validation_error():
 async def test_pypi_package_version_json_raises_validation_error():
     """Test that ValidationError from safe_join_path is handled."""
     from app.validators import ValidationError
-    
-    with patch("app.routes.pypi_routes.safe_join_path", 
-               side_effect=ValidationError("Invalid path")):
+
+    with patch(
+        "app.routes.pypi_routes.safe_join_path",
+        side_effect=ValidationError("Invalid path"),
+    ):
         request_mock = AsyncMock()
         with pytest.raises(HTTPException) as exc_info:
-            await pypi_routes.pypi_package_version_json("requests", "2.0.0", request_mock)
+            await pypi_routes.pypi_package_version_json(
+                "requests", "2.0.0", request_mock
+            )
         assert exc_info.value.status_code == 400
 
 
 @pytest.mark.asyncio
-@patch("app.routes.pypi_routes.utils.conditional_file_response", 
-       new_callable=AsyncMock)
+@patch("app.routes.pypi_routes.utils.conditional_file_response", new_callable=AsyncMock)
 async def test_pypi_root_index_file_not_found(mock_response):
     """Test FileNotFoundError handling for root index (no try-except in endpoint)."""
     request_mock = AsyncMock()
@@ -292,8 +312,7 @@ async def test_pypi_root_index_file_not_found(mock_response):
 
 @pytest.mark.asyncio
 @patch("app.routes.pypi_routes.utils.is_cache_stale", return_value=False)
-@patch("app.routes.pypi_routes.utils.conditional_file_response", 
-       new_callable=AsyncMock)
+@patch("app.routes.pypi_routes.utils.conditional_file_response", new_callable=AsyncMock)
 async def test_pypi_package_index_file_not_found(mock_response, mock_stale):
     """Test FileNotFoundError handling for package index."""
     request_mock = AsyncMock()
@@ -304,8 +323,10 @@ async def test_pypi_package_index_file_not_found(mock_response, mock_stale):
 
 
 @pytest.mark.asyncio
-@patch("app.routes.pypi_routes.utils.conditional_file_response", 
-       side_effect=FileNotFoundError("Not found"))
+@patch(
+    "app.routes.pypi_routes.utils.conditional_file_response",
+    side_effect=FileNotFoundError("Not found"),
+)
 async def test_pypi_artifact_file_not_found(mock_response):
     """Test FileNotFoundError handling for artifacts."""
     request_mock = AsyncMock()
@@ -316,8 +337,7 @@ async def test_pypi_artifact_file_not_found(mock_response):
 
 
 @pytest.mark.asyncio
-@patch("app.routes.pypi_routes.utils.conditional_file_response", 
-       new_callable=AsyncMock)
+@patch("app.routes.pypi_routes.utils.conditional_file_response", new_callable=AsyncMock)
 async def test_pypi_package_json_file_not_found(mock_response):
     """Test FileNotFoundError handling for package JSON."""
     request_mock = AsyncMock()
@@ -328,15 +348,16 @@ async def test_pypi_package_json_file_not_found(mock_response):
 
 
 @pytest.mark.asyncio
-@patch("app.routes.pypi_routes.utils.conditional_file_response", 
-       new_callable=AsyncMock)
+@patch("app.routes.pypi_routes.utils.conditional_file_response", new_callable=AsyncMock)
 async def test_pypi_package_version_json_file_not_found(mock_response):
     """Test FileNotFoundError handling for package version JSON."""
     request_mock = AsyncMock()
     mock_response.side_effect = FileNotFoundError("Not found")
     with patch.object(Path, "exists", return_value=True):
         with pytest.raises(FileNotFoundError):
-            await pypi_routes.pypi_package_version_json("requests", "2.0.0", request_mock)
+            await pypi_routes.pypi_package_version_json(
+                "requests", "2.0.0", request_mock
+            )
 
 
 @pytest.mark.asyncio
@@ -380,7 +401,9 @@ async def test_pypi_package_version_json_invalid_version():
     """Test rejection of invalid version strings."""
     request_mock = AsyncMock()
     with pytest.raises(HTTPException) as exc_info:
-        await pypi_routes.pypi_package_version_json("requests", "../../../evil", request_mock)
+        await pypi_routes.pypi_package_version_json(
+            "requests", "../../../evil", request_mock
+        )
     assert exc_info.value.status_code == 400
 
 
@@ -419,7 +442,9 @@ async def test_pypi_package_version_json_cached(mock_fetch, mock_response):
     with patch.object(Path, "exists", return_value=True):
         mock_response.return_value = {"version": "2.0.0"}
         request_mock = AsyncMock()
-        response = await pypi_routes.pypi_package_version_json("requests", "2.0.0", request_mock)
+        response = await pypi_routes.pypi_package_version_json(
+            "requests", "2.0.0", request_mock
+        )
         mock_fetch.assert_not_called()
         mock_response.assert_called_once()
 
@@ -427,6 +452,7 @@ async def test_pypi_package_version_json_cached(mock_fetch, mock_response):
 # ------------------------------------------------------------------
 # SECURITY: artifact path charset validation + upstream URL quoting
 # ------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_pypi_artifact_rejects_control_characters():
@@ -460,4 +486,7 @@ async def test_pypi_artifact_quotes_upstream_url(mock_fetch, mock_response):
 
         mock_fetch.assert_called_once()
         called_url = mock_fetch.call_args[0][0]
-        assert called_url == "https://files.pythonhosted.org/packages/aa/bb/requests-2.0.0%2Blocal.whl"
+        assert (
+            called_url
+            == "https://files.pythonhosted.org/packages/aa/bb/requests-2.0.0%2Blocal.whl"
+        )

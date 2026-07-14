@@ -17,19 +17,20 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Iterable, Optional
-from fastapi import HTTPException, Request, Response
-from pathlib import Path
-from datetime import datetime, timezone
-from http import HTTPMethod
 import hashlib
 import json
 import logging
-import httpx
-import aiofiles
 import os
 import tempfile
 import time
+from datetime import datetime, timezone
+from http import HTTPMethod
+from pathlib import Path
+from typing import Iterable, Optional
+
+import aiofiles
+import httpx2
+from fastapi import HTTPException, Request, Response
 
 import app.config as config
 
@@ -88,29 +89,33 @@ def safe_cache_path(cache_root: Path, *parts: Iterable[str]) -> Path:
         raise ValueError(f"Refused unsafe path outside cache: {candidate_abs}")
 
     return candidate_abs
+
+
 # ----------------------------------------------------------------------
 # Network fetch + local caching (atomic, safe)
 # ----------------------------------------------------------------------
 
 # Hop-by-hop / connection-specific headers must never be forwarded verbatim
-# to an upstream server: httpx computes its own framing (content-length,
+# to an upstream server: httpx2 computes its own framing (content-length,
 # connection handling) for the outgoing request, so passing through a
 # caller's original values risks request smuggling / mismatched framing
 # upstream. Centralized here since fetch_and_cache is the single chokepoint
 # every outbound registry request (pypi/npm/maven) goes through, so any
 # caller that forwards client-supplied headers is protected automatically.
-_HOP_BY_HOP_HEADERS = frozenset({
-    "host",
-    "content-length",
-    "transfer-encoding",
-    "connection",
-    "keep-alive",
-    "upgrade",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-})
+_HOP_BY_HOP_HEADERS = frozenset(
+    {
+        "host",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "keep-alive",
+        "upgrade",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+    }
+)
 
 
 def strip_hop_by_hop_headers(headers: dict) -> dict:
@@ -150,10 +155,8 @@ async def fetch_and_cache(
         dest_abs = dest.resolve(strict=False)
         dest_abs.relative_to(cache_root)
     except Exception:
-        logger.warning(
-            "Refused fetch_and_cache for dest outside cache: %s", dest)
-        raise HTTPException(
-            status_code=400, detail="Invalid cache destination")
+        logger.warning("Refused fetch_and_cache for dest outside cache: %s", dest)
+        raise HTTPException(status_code=400, detail="Invalid cache destination")
 
     # Return existing cache if not forcing refresh
     if dest.exists() and not force_refresh:
@@ -172,14 +175,14 @@ async def fetch_and_cache(
         request_headers["user-agent"] = "fastapi-nexus-proxy/1.0"
 
     # Fetch from upstream
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+    async with httpx2.AsyncClient(follow_redirects=True, timeout=timeout) as client:
         try:
             if method == HTTPMethod.POST:
                 resp = await client.post(url, content=data, headers=request_headers)
             else:
                 resp = await client.get(url, headers=request_headers)
             resp.raise_for_status()
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise HTTPException(
                 status_code=e.response.status_code,
                 detail=f"Upstream error: {url}",
@@ -286,9 +289,9 @@ async def conditional_file_response(
     if_none_match = request.headers.get("if-none-match") or request.headers.get(
         "If-None-Match"
     )
-    if_modified_since = request.headers.get(
-        "if-modified-since"
-    ) or request.headers.get("If-Modified-Since")
+    if_modified_since = request.headers.get("if-modified-since") or request.headers.get(
+        "If-Modified-Since"
+    )
 
     if if_none_match == etag or if_modified_since == last_modified:
         return Response(status_code=304)
@@ -323,7 +326,9 @@ def is_cache_stale(path: Path, max_age_hours: int = 24) -> bool:
         return True
 
 
-async def fetch_and_serve_json(url: str, local_path: Path, request: Request) -> Response:
+async def fetch_and_serve_json(
+    url: str, local_path: Path, request: Request
+) -> Response:
     """
     Helper to fetch JSON from upstream into a given local cache path and return
     a conditional JSON response. Caller is responsible for validating/constructing

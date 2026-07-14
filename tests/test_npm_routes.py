@@ -18,11 +18,13 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import time
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, patch
-from pathlib import Path
+
 from app.routes import npm_routes
 
 
@@ -31,13 +33,16 @@ from app.routes import npm_routes
 @patch("app.routes.npm_routes.utils.is_cache_stale", return_value=True)
 @patch("app.routes.npm_routes.utils.conditional_file_response", new_callable=AsyncMock)
 @patch("app.routes.npm_routes.utils.fetch_and_cache", new_callable=AsyncMock)
-async def test_npm_package_metadata_stale_refresh(mock_fetch, mock_response, mock_stale):
+async def test_npm_package_metadata_stale_refresh(
+    mock_fetch, mock_response, mock_stale
+):
     test_package = "lodash"
     with patch.object(Path, "exists", return_value=True):
         mock_response.return_value = {"name": "lodash"}
         await npm_routes.npm_package_metadata(test_package, request=AsyncMock())
         mock_fetch.assert_called_once()
         mock_response.assert_called_once()
+
 
 # Test cache freshness logic for npm metadata
 @pytest.mark.asyncio
@@ -51,6 +56,7 @@ async def test_npm_package_metadata_fresh_cache(mock_fetch, mock_response, mock_
         await npm_routes.npm_package_metadata(test_package, request=AsyncMock())
         mock_fetch.assert_not_called()
         mock_response.assert_called_once()
+
 
 client = TestClient(npm_routes.router)
 
@@ -73,7 +79,9 @@ async def test_npm_package_metadata_fetch(mock_fetch, mock_response):
     # File does not exist -> fetch_and_cache should be called
     with patch.object(Path, "exists", return_value=False):
         mock_response.return_value = {"name": "lodash"}
-        response = await npm_routes.npm_package_metadata(test_package, request=AsyncMock())
+        response = await npm_routes.npm_package_metadata(
+            test_package, request=AsyncMock()
+        )
         mock_fetch.assert_called_once()
         mock_response.assert_called_once()
 
@@ -88,7 +96,9 @@ async def test_npm_package_metadata_cached(mock_fetch, mock_response, mock_stale
     # File exists -> fetch_and_cache should NOT be called
     with patch.object(Path, "exists", return_value=True):
         mock_response.return_value = {"name": "lodash"}
-        response = await npm_routes.npm_package_metadata(test_package, request=AsyncMock())
+        response = await npm_routes.npm_package_metadata(
+            test_package, request=AsyncMock()
+        )
         mock_fetch.assert_not_called()
         mock_response.assert_called_once()
 
@@ -103,7 +113,9 @@ async def test_npm_package_tarball_fetch(mock_fetch, mock_response):
     # File does not exist -> fetch_and_cache should be called
     with patch.object(Path, "exists", return_value=False):
         mock_response.return_value = b"tarball content"
-        response = await npm_routes.npm_package_tarball(test_package, tarball, request=AsyncMock())
+        response = await npm_routes.npm_package_tarball(
+            test_package, tarball, request=AsyncMock()
+        )
         mock_fetch.assert_called_once()
         mock_response.assert_called_once()
 
@@ -118,7 +130,9 @@ async def test_npm_package_tarball_cached(mock_fetch, mock_response):
     # File exists -> fetch_and_cache should NOT be called
     with patch.object(Path, "exists", return_value=True):
         mock_response.return_value = b"cached tarball"
-        response = await npm_routes.npm_package_tarball(test_package, tarball, request=AsyncMock())
+        response = await npm_routes.npm_package_tarball(
+            test_package, tarball, request=AsyncMock()
+        )
         mock_fetch.assert_not_called()
         mock_response.assert_called_once()
 
@@ -135,6 +149,7 @@ async def test_npm_security_bulk_fetch(mock_fetch, mock_response):
     with patch.object(Path, "exists", return_value=False):
         request_mock = AsyncMock()
         request_mock.body.return_value = body
+        request_mock.headers = {}
         mock_fetch.return_value = {"result": "ok"}
         response = await npm_routes.npm_security_bulk(request_mock)
         mock_fetch.assert_called_once()
@@ -152,6 +167,7 @@ async def test_npm_security_bulk_cached(mock_response, mock_stale):
     # File exists and is fresh -> conditional_file_response should be called
     with patch.object(Path, "exists", return_value=True):
         mock_response.return_value = {"cached": True}
+        request_mock.headers = {}
         response = await npm_routes.npm_security_bulk(request_mock)
         mock_response.assert_called_once()
         assert response == {"cached": True}
@@ -165,7 +181,7 @@ async def test_npm_security_bulk_stale_refresh(mock_fetch, mock_stale):
     body = b'{"advisories":[]}'
     request_mock = AsyncMock()
     request_mock.body.return_value = body
-
+    request_mock.headers = {}
     mock_fetch.return_value = {"freshly": "fetched"}
     response = await npm_routes.npm_security_bulk(request_mock)
     mock_fetch.assert_called_once()
@@ -175,7 +191,9 @@ async def test_npm_security_bulk_stale_refresh(mock_fetch, mock_stale):
 @pytest.mark.asyncio
 @patch("app.routes.npm_routes.utils.conditional_file_response", new_callable=AsyncMock)
 @patch("app.routes.npm_routes.utils.fetch_and_cache", new_callable=AsyncMock)
-async def test_npm_security_bulk_forwards_headers_and_content_type_default(mock_fetch, mock_response):
+async def test_npm_security_bulk_forwards_headers_and_content_type_default(
+    mock_fetch, mock_response
+):
     """Extracted headers (plus a default content-type) reach fetch_and_cache,
     which is responsible for stripping hop-by-hop headers before forwarding
     upstream (see test_utils.py for that coverage)."""
@@ -200,7 +218,9 @@ async def test_npm_security_bulk_forwards_headers_and_content_type_default(mock_
 @pytest.mark.asyncio
 @patch("app.routes.npm_routes.utils.conditional_file_response", new_callable=AsyncMock)
 @patch("app.routes.npm_routes.utils.fetch_and_cache", new_callable=AsyncMock)
-async def test_npm_security_audit_quick_forwards_headers_and_content_type_default(mock_fetch, mock_response):
+async def test_npm_security_audit_quick_forwards_headers_and_content_type_default(
+    mock_fetch, mock_response
+):
     """Extracted headers (plus a default content-type) reach fetch_and_cache,
     which is responsible for stripping hop-by-hop headers before forwarding
     upstream (see test_utils.py for that coverage)."""
@@ -240,12 +260,16 @@ async def test_npm_package_tarball_rejects_traversal():
 # Additional Coverage Tests
 # ========================================
 
+
 @pytest.mark.asyncio
 async def test_npm_package_metadata_raises_validation_error():
     """Test that ValidationError in safe_join_path raises HTTPException(400)."""
     from app.validators import ValidationError
-    
-    with patch("app.routes.npm_routes.safe_join_path", side_effect=ValidationError("Invalid path")):
+
+    with patch(
+        "app.routes.npm_routes.safe_join_path",
+        side_effect=ValidationError("Invalid path"),
+    ):
         with pytest.raises(HTTPException) as exc_info:
             await npm_routes.npm_package_metadata("lodash", request=AsyncMock())
         assert exc_info.value.status_code == 400
@@ -255,10 +279,14 @@ async def test_npm_package_metadata_raises_validation_error():
 async def test_npm_package_metadata_file_not_found_error():
     """Test that FileNotFoundError from conditional_file_response raises HTTPException(404)."""
     with patch("app.routes.npm_routes.utils.is_cache_stale", return_value=False):
-        with patch("app.routes.npm_routes.utils.conditional_file_response", 
-                   side_effect=FileNotFoundError("Not found")):
+        with patch(
+            "app.routes.npm_routes.utils.conditional_file_response",
+            side_effect=FileNotFoundError("Not found"),
+        ):
             with pytest.raises(HTTPException) as exc_info:
-                await npm_routes.npm_package_metadata("nonexistent", request=AsyncMock())
+                await npm_routes.npm_package_metadata(
+                    "nonexistent", request=AsyncMock()
+                )
             assert exc_info.value.status_code == 404
 
 
@@ -266,7 +294,9 @@ async def test_npm_package_metadata_file_not_found_error():
 async def test_npm_package_tarball_invalid_tarball_name():
     """Test rejection of invalid tarball filename."""
     with pytest.raises(HTTPException) as exc_info:
-        await npm_routes.npm_package_tarball("lodash", "../../../etc/passwd", request=AsyncMock())
+        await npm_routes.npm_package_tarball(
+            "lodash", "../../../etc/passwd", request=AsyncMock()
+        )
     assert exc_info.value.status_code == 400
 
 
@@ -274,21 +304,30 @@ async def test_npm_package_tarball_invalid_tarball_name():
 async def test_npm_package_tarball_raises_validation_error():
     """Test that ValidationError in safe_join_path raises HTTPException(400)."""
     from app.validators import ValidationError
-    
-    with patch("app.routes.npm_routes.safe_join_path", side_effect=ValidationError("Invalid path")):
+
+    with patch(
+        "app.routes.npm_routes.safe_join_path",
+        side_effect=ValidationError("Invalid path"),
+    ):
         with pytest.raises(HTTPException) as exc_info:
-            await npm_routes.npm_package_tarball("lodash", "lodash-4.17.21.tgz", request=AsyncMock())
+            await npm_routes.npm_package_tarball(
+                "lodash", "lodash-4.17.21.tgz", request=AsyncMock()
+            )
         assert exc_info.value.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_npm_package_tarball_file_not_found_error():
     """Test that FileNotFoundError from conditional_file_response raises HTTPException(404)."""
-    with patch("app.routes.npm_routes.utils.conditional_file_response", 
-               side_effect=FileNotFoundError("Not found")):
+    with patch(
+        "app.routes.npm_routes.utils.conditional_file_response",
+        side_effect=FileNotFoundError("Not found"),
+    ):
         with patch.object(Path, "exists", return_value=True):
             with pytest.raises(HTTPException) as exc_info:
-                await npm_routes.npm_package_tarball("lodash", "missing.tgz", request=AsyncMock())
+                await npm_routes.npm_package_tarball(
+                    "lodash", "missing.tgz", request=AsyncMock()
+                )
             assert exc_info.value.status_code == 404
 
 
@@ -296,12 +335,15 @@ async def test_npm_package_tarball_file_not_found_error():
 async def test_npm_security_bulk_raises_validation_error():
     """Test that ValidationError in safe_join_path raises HTTPException(400)."""
     from app.validators import ValidationError
-    
+
     body = b'{"advisories":[]}'
     request_mock = AsyncMock()
     request_mock.body.return_value = body
-    
-    with patch("app.routes.npm_routes.safe_join_path", side_effect=ValidationError("Invalid path")):
+
+    with patch(
+        "app.routes.npm_routes.safe_join_path",
+        side_effect=ValidationError("Invalid path"),
+    ):
         with pytest.raises(HTTPException) as exc_info:
             await npm_routes.npm_security_bulk(request_mock)
         assert exc_info.value.status_code == 400
@@ -311,18 +353,24 @@ async def test_npm_security_bulk_raises_validation_error():
 async def test_npm_security_bulk_file_not_found_error():
     """Test that FileNotFoundError triggers fetch from upstream."""
     from unittest.mock import AsyncMock as AsyncMockClass
-    
+
     body = b'{"advisories":[]}'
     request_mock = AsyncMockClass()
     request_mock.body.return_value = body
-    
+
     # is_cache_stale returns False (cache is fresh), but conditional_file_response raises FileNotFoundError
     # This edge case should trigger fetch from upstream
     with patch("app.routes.npm_routes.utils.is_cache_stale", return_value=False):
-        with patch("app.routes.npm_routes.utils.conditional_file_response", 
-                   side_effect=FileNotFoundError("Not found")):
-            with patch("app.routes.npm_routes.utils.fetch_and_cache", new_callable=AsyncMockClass) as mock_fetch:
+        with patch(
+            "app.routes.npm_routes.utils.conditional_file_response",
+            side_effect=FileNotFoundError("Not found"),
+        ):
+            with patch(
+                "app.routes.npm_routes.utils.fetch_and_cache",
+                new_callable=AsyncMockClass,
+            ) as mock_fetch:
                 mock_fetch.return_value = {"fetched": "data"}
+                request_mock.headers = {}
                 response = await npm_routes.npm_security_bulk(request_mock)
                 mock_fetch.assert_called_once()
                 assert response == {"fetched": "data"}
@@ -354,7 +402,9 @@ async def test_npm_package_metadata_invalid_package_name():
 async def test_npm_package_tarball_invalid_package_name():
     """Test rejection of invalid package names in tarball endpoint."""
     with pytest.raises(HTTPException) as exc_info:
-        await npm_routes.npm_package_tarball("../../evil", "tarball.tgz", request=AsyncMock())
+        await npm_routes.npm_package_tarball(
+            "../../evil", "tarball.tgz", request=AsyncMock()
+        )
     assert exc_info.value.status_code == 400
 
 
@@ -369,6 +419,8 @@ async def test_npm_package_tarball_fresh_cache(mock_fetch, mock_response, mock_s
 
     with patch.object(Path, "exists", return_value=True):
         mock_response.return_value = b"cached content"
-        response = await npm_routes.npm_package_tarball(test_package, tarball, request=AsyncMock())
+        response = await npm_routes.npm_package_tarball(
+            test_package, tarball, request=AsyncMock()
+        )
         mock_fetch.assert_not_called()
         mock_response.assert_called_once()

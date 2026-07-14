@@ -18,15 +18,19 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
 # from pathlib import Path
 import json
+import sys
+from http import HTTPMethod
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 # import os
 # from datetime import datetime
 from fastapi.responses import Response
+
 import app.utils as utils
-from http import HTTPMethod
 
 
 @pytest.fixture(autouse=True)
@@ -39,6 +43,7 @@ def patch_cache_dir(tmp_path, monkeypatch):
 # ------------------------
 # safe_cache_path
 # ------------------------
+
 
 def test_safe_cache_path_allows_nested(monkeypatch, tmp_path):
     path = utils.safe_cache_path(tmp_path, "nested", "dir", "file.txt")
@@ -59,6 +64,7 @@ def test_safe_cache_path_rejects_absolute(tmp_path):
 # open_cached_file
 # ------------------------
 
+
 def test_open_cached_file(tmp_path):
     file_path = tmp_path / "test.txt"
     file_path.write_bytes(b"hello")
@@ -74,6 +80,7 @@ def test_open_cached_file(tmp_path):
 # make_etag_and_last_modified
 # ------------------------
 
+
 def test_make_etag_and_last_modified(tmp_path):
     file_path = tmp_path / "file.txt"
     file_path.write_text("abc")
@@ -87,6 +94,7 @@ def test_make_etag_and_last_modified(tmp_path):
 # file_headers
 # ------------------------
 
+
 def test_file_headers(tmp_path):
     file_path = tmp_path / "file.txt"
     file_path.write_text("abc")
@@ -98,6 +106,7 @@ def test_file_headers(tmp_path):
 # ------------------------
 # conditional_file_response
 # ------------------------
+
 
 @pytest.mark.asyncio
 async def test_conditional_file_response_returns_content(tmp_path):
@@ -132,6 +141,24 @@ async def test_conditional_file_response_304(tmp_path):
     assert response.status_code == 304
 
 
+def _can_symlink(tmp_path) -> bool:
+    """Probe once whether this process/OS can create symlinks."""
+    try:
+        target = tmp_path / "_symlink_probe_target"
+        link = tmp_path / "_symlink_probe_link"
+        target.write_text("x")
+        link.symlink_to(target)
+        link.unlink()
+        target.unlink()
+        return True
+    except (OSError, NotImplementedError):
+        return False
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="symlink creation requires admin/dev mode on Windows",
+)
 @pytest.mark.asyncio
 async def test_conditional_file_response_rejects_symlink(tmp_path):
     """A symlink under the cache dir must never be served, even if its
@@ -149,6 +176,10 @@ async def test_conditional_file_response_rejects_symlink(tmp_path):
         await utils.conditional_file_response(request, link_path, "text/plain")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="symlink creation requires admin/dev mode on Windows",
+)
 @pytest.mark.asyncio
 async def test_conditional_file_response_rejects_symlink_escaping_cache(tmp_path):
     """A symlink pointing outside the cache root must be refused."""
@@ -181,6 +212,7 @@ async def test_conditional_file_response_rejects_outside_cache(tmp_path):
 # strip_hop_by_hop_headers
 # ------------------------
 
+
 def test_strip_hop_by_hop_headers_removes_known_headers():
     headers = {
         "Host": "attacker.example",
@@ -207,8 +239,11 @@ def test_strip_hop_by_hop_headers_empty_dict():
 # fetch_and_cache
 # ------------------------
 
+
 @pytest.mark.asyncio
-async def test_fetch_and_cache_strips_hop_by_hop_headers_before_upstream_call(monkeypatch, tmp_path):
+async def test_fetch_and_cache_strips_hop_by_hop_headers_before_upstream_call(
+    monkeypatch, tmp_path
+):
     """fetch_and_cache is the shared chokepoint for every outbound registry
     request (pypi/npm/maven); it must strip hop-by-hop headers itself so any
     caller forwarding client headers is protected automatically."""
@@ -222,7 +257,7 @@ async def test_fetch_and_cache_strips_hop_by_hop_headers_before_upstream_call(mo
     mock_resp.raise_for_status = MagicMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.get.return_value = mock_resp
-    monkeypatch.setattr(utils.httpx, "AsyncClient", lambda **_: mock_client)
+    monkeypatch.setattr(utils.httpx2, "AsyncClient", lambda **_: mock_client)
 
     await utils.fetch_and_cache(
         url,
@@ -254,7 +289,7 @@ async def test_fetch_and_cache_get_bytes(monkeypatch, tmp_path):
     mock_resp.raise_for_status = MagicMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.get.return_value = mock_resp
-    monkeypatch.setattr(utils.httpx, "AsyncClient", lambda **_: mock_client)
+    monkeypatch.setattr(utils.httpx2, "AsyncClient", lambda **_: mock_client)
 
     result = await utils.fetch_and_cache(url, dest)
     assert dest.exists()
@@ -277,7 +312,7 @@ async def test_fetch_and_cache_post_json(monkeypatch, tmp_path):
     mock_resp.raise_for_status = MagicMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.post.return_value = mock_resp
-    monkeypatch.setattr(utils.httpx, "AsyncClient", lambda **_: mock_client)
+    monkeypatch.setattr(utils.httpx2, "AsyncClient", lambda **_: mock_client)
 
     result = await utils.fetch_and_cache(
         url, dest, method=HTTPMethod.POST, data=data, return_json=True
@@ -298,12 +333,12 @@ async def test_fetch_and_cache_raises_http_exception(monkeypatch, tmp_path):
     mock_client = AsyncMock()
     mock_resp = MagicMock()
     mock_resp.status_code = 404
-    mock_resp.raise_for_status.side_effect = utils.httpx.HTTPStatusError(
+    mock_resp.raise_for_status.side_effect = utils.httpx2.HTTPStatusError(
         "Not Found", request=None, response=mock_resp
     )
     mock_client.__aenter__.return_value = mock_client
     mock_client.get.return_value = mock_resp
-    monkeypatch.setattr(utils.httpx, "AsyncClient", lambda **_: mock_client)
+    monkeypatch.setattr(utils.httpx2, "AsyncClient", lambda **_: mock_client)
 
     with pytest.raises(utils.HTTPException) as exc:
         await utils.fetch_and_cache(url, dest)
@@ -314,13 +349,14 @@ async def test_fetch_and_cache_raises_http_exception(monkeypatch, tmp_path):
 # Additional safety checks
 # ------------------------
 
+
 @pytest.mark.asyncio
 async def test_fetch_and_cache_refuses_outside_cache(monkeypatch, tmp_path):
     """Destination outside cache should raise HTTPException(400)."""
     outside = tmp_path.parent / "escape.txt"
     mock_client = AsyncMock()
     mock_client.__aenter__.return_value = mock_client
-    monkeypatch.setattr(utils.httpx, "AsyncClient", lambda **_: mock_client)
+    monkeypatch.setattr(utils.httpx2, "AsyncClient", lambda **_: mock_client)
 
     with pytest.raises(utils.HTTPException) as exc:
         await utils.fetch_and_cache("http://example.com", outside)
@@ -335,6 +371,7 @@ def test_safe_cache_path_preserves_relative(tmp_path):
 # ========================================
 # Additional Coverage Tests
 # ========================================
+
 
 def test_safe_cache_path_rejects_double_dot(tmp_path):
     """Test explicit rejection of .. segment."""
@@ -363,6 +400,7 @@ def test_safe_cache_path_rejects_drive_letter(tmp_path):
     # with pytest.raises(ValueError, match="Absolute path not allowed"):
     #     utils.safe_cache_path(tmp_path, "C:\\evil")
 
+
 def test_safe_cache_path_handles_none_parts(tmp_path):
     """Test that None parts are skipped."""
     p = utils.safe_cache_path(tmp_path, "a", None, "b.txt")
@@ -382,7 +420,7 @@ async def test_fetch_and_cache_returns_existing_file_bytes(monkeypatch, tmp_path
     """Test that fetch_and_cache returns existing file without fetching."""
     dest = tmp_path / "data.txt"
     dest.write_bytes(b"cached content")
-    
+
     result = await utils.fetch_and_cache("http://example.com/data.txt", dest)
     assert result == dest
     assert dest.read_bytes() == b"cached content"
@@ -393,7 +431,7 @@ async def test_fetch_and_cache_returns_existing_file_json(monkeypatch, tmp_path)
     """Test that fetch_and_cache returns existing JSON without fetching."""
     dest = tmp_path / "data.json"
     dest.write_text('{"cached": true}')
-    
+
     result = await utils.fetch_and_cache(
         "http://example.com/data.json", dest, return_json=True
     )
@@ -406,7 +444,7 @@ async def test_conditional_file_response_not_found(tmp_path):
     file_path = tmp_path / "missing.txt"
     request = MagicMock()
     request.headers = {}
-    
+
     with pytest.raises(FileNotFoundError):
         await utils.conditional_file_response(request, file_path, "text/plain")
 
@@ -416,10 +454,10 @@ async def test_conditional_file_response_with_attachment(tmp_path):
     """Test that conditional_file_response sets Content-Disposition for attachments."""
     file_path = tmp_path / "file.bin"
     file_path.write_bytes(b"binary data")
-    
+
     request = MagicMock()
     request.headers = {}
-    
+
     response = await utils.conditional_file_response(
         request, file_path, "application/octet-stream", attachment=True
     )
@@ -433,12 +471,12 @@ async def test_conditional_file_response_if_none_match_case_insensitive(tmp_path
     """Test that if-none-match header works with lowercase key."""
     file_path = tmp_path / "file.txt"
     file_path.write_text("content")
-    
+
     etag, _ = utils.make_etag_and_last_modified(file_path)
-    
+
     request = MagicMock()
     request.headers = {"if-none-match": etag}
-    
+
     response = await utils.conditional_file_response(request, file_path, "text/plain")
     assert response.status_code == 304
 
@@ -448,12 +486,12 @@ async def test_conditional_file_response_if_modified_since_case_insensitive(tmp_
     """Test that if-modified-since header works with lowercase key."""
     file_path = tmp_path / "file.txt"
     file_path.write_text("content")
-    
+
     _, last_modified = utils.make_etag_and_last_modified(file_path)
-    
+
     request = MagicMock()
     request.headers = {"if-modified-since": last_modified}
-    
+
     response = await utils.conditional_file_response(request, file_path, "text/plain")
     assert response.status_code == 304
 
@@ -463,7 +501,7 @@ async def test_fetch_and_cache_post_without_json(monkeypatch, tmp_path):
     """Test POST request returning bytes (not JSON)."""
     url = "http://example.com/upload"
     dest = tmp_path / "result.bin"
-    
+
     mock_client = AsyncMock()
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -471,8 +509,8 @@ async def test_fetch_and_cache_post_without_json(monkeypatch, tmp_path):
     mock_resp.raise_for_status = MagicMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.post.return_value = mock_resp
-    monkeypatch.setattr(utils.httpx, "AsyncClient", lambda **_: mock_client)
-    
+    monkeypatch.setattr(utils.httpx2, "AsyncClient", lambda **_: mock_client)
+
     result = await utils.fetch_and_cache(
         url, dest, method=HTTPMethod.POST, data=b"request data", return_json=False
     )
@@ -486,7 +524,7 @@ async def test_fetch_and_cache_timeout_parameter(monkeypatch, tmp_path):
     """Test that timeout parameter is passed to AsyncClient."""
     url = "http://example.com/data.txt"
     dest = tmp_path / "data.txt"
-    
+
     mock_client = AsyncMock()
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -494,14 +532,15 @@ async def test_fetch_and_cache_timeout_parameter(monkeypatch, tmp_path):
     mock_resp.raise_for_status = MagicMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.get.return_value = mock_resp
-    
+
     client_init_args = {}
+
     def mock_client_init(**kwargs):
         client_init_args.update(kwargs)
         return mock_client
-    
-    monkeypatch.setattr(utils.httpx, "AsyncClient", mock_client_init)
-    
+
+    monkeypatch.setattr(utils.httpx2, "AsyncClient", mock_client_init)
+
     await utils.fetch_and_cache(url, dest, timeout=120.0)
     assert client_init_args.get("timeout") == 120.0
 
@@ -517,15 +556,15 @@ async def test_conditional_file_response_case_insensitive_headers(tmp_path):
     """Test that uppercase header keys are also supported."""
     file_path = tmp_path / "file.txt"
     file_path.write_text("content")
-    
+
     etag, last_modified = utils.make_etag_and_last_modified(file_path)
-    
+
     # Test with uppercase If-None-Match
     request = MagicMock()
     request.headers = {"If-None-Match": etag}
     response = await utils.conditional_file_response(request, file_path, "text/plain")
     assert response.status_code == 304
-    
+
     # Test with uppercase If-Modified-Since
     request = MagicMock()
     request.headers = {"If-Modified-Since": last_modified}
