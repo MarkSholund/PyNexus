@@ -17,15 +17,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-from datetime import datetime, timedelta
 from urllib.parse import quote, urlparse
 
 import httpx2
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, Request
 
-import app.config as config
-import app.utils as utils
+from app import config, utils
 from app.validators import (
     ValidationError,
     safe_join_path,
@@ -150,8 +148,7 @@ async def pypi_artifact(path: str, request: Request):
 
     if not local_path.exists():
         upstream_path = path
-        if upstream_path.startswith("packages/"):
-            upstream_path = upstream_path[len("packages/") :]
+        upstream_path = upstream_path.removeprefix("packages/")
         upstream_url = (
             f"https://files.pythonhosted.org/packages/{quote(upstream_path, safe='/')}"
         )

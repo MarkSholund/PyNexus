@@ -17,14 +17,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-from fastapi import FastAPI
-from app.routes import pypi_routes, maven_routes, npm_routes
-from app.middleware import MaxBodySizeMiddleware
-import app.config as config
 import logging
 from contextlib import asynccontextmanager
 
-logger = logging.getLogger('uvicorn')
+from fastapi import FastAPI
+
+from app import config
+from app.middleware import MaxBodySizeMiddleware
+from app.routes import maven_routes, npm_routes, pypi_routes
+
+logger = logging.getLogger("uvicorn")
 
 
 @asynccontextmanager
@@ -33,9 +35,9 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("Shutting down FastAPI app")
 
+
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(MaxBodySizeMiddleware,
-                    max_bytes=config.MAX_REQUEST_BODY_BYTES)
+app.add_middleware(MaxBodySizeMiddleware, max_bytes=config.MAX_REQUEST_BODY_BYTES)
 app.include_router(pypi_routes.router)
 app.include_router(maven_routes.router)
 app.include_router(npm_routes.router)
@@ -43,4 +45,7 @@ app.include_router(npm_routes.router)
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "Local caching proxy for PyPI and Maven (no compression)"}
+    return {
+        "status": "ok",
+        "message": "Local caching proxy for PyPI and Maven (no compression)",
+    }

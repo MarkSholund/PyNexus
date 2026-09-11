@@ -3,3 +3,5 @@ __pycache__
 /venv
 .coverage
 .github/copilot-instructions.md
+uv.lock
+

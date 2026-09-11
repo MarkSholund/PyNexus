@@ -17,8 +17,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 # Base cache directory
 CACHE_DIR = Path(os.environ.get("NEXUS_CACHE_DIR", "cache"))
@@ -28,17 +28,25 @@ CACHE_DIR = Path(os.environ.get("NEXUS_CACHE_DIR", "cache"))
 
 # PyPI TTL settings
 PYPI_METADATA_TTL_HOURS: int = int(os.environ.get("PYPI_METADATA_TTL_HOURS", "24"))
-PYPI_PACKAGE_TTL_HOURS: int = int(os.environ.get("PYPI_PACKAGE_TTL_HOURS", "0"))  # Immutable artifacts
+PYPI_PACKAGE_TTL_HOURS: int = int(
+    os.environ.get("PYPI_PACKAGE_TTL_HOURS", "0")
+)  # Immutable artifacts
 
 # NPM TTL settings
 NPM_METADATA_TTL_HOURS: int = int(os.environ.get("NPM_METADATA_TTL_HOURS", "24"))
-NPM_TARBALL_TTL_HOURS: int = int(os.environ.get("NPM_TARBALL_TTL_HOURS", "0"))  # Immutable artifacts
+NPM_TARBALL_TTL_HOURS: int = int(
+    os.environ.get("NPM_TARBALL_TTL_HOURS", "0")
+)  # Immutable artifacts
 NPM_SECURITY_TTL_HOURS: int = int(os.environ.get("NPM_SECURITY_TTL_HOURS", "6"))
 
 # Maven TTL settings
 MAVEN_METADATA_TTL_HOURS: int = int(os.environ.get("MAVEN_METADATA_TTL_HOURS", "24"))
-MAVEN_ARTIFACT_TTL_HOURS: int = int(os.environ.get("MAVEN_ARTIFACT_TTL_HOURS", "0"))  # Immutable artifacts
-MAVEN_SNAPSHOT_TTL_HOURS: int = int(os.environ.get("MAVEN_SNAPSHOT_TTL_HOURS", "1"))  # Snapshots change frequently
+MAVEN_ARTIFACT_TTL_HOURS: int = int(
+    os.environ.get("MAVEN_ARTIFACT_TTL_HOURS", "0")
+)  # Immutable artifacts
+MAVEN_SNAPSHOT_TTL_HOURS: int = int(
+    os.environ.get("MAVEN_SNAPSHOT_TTL_HOURS", "1")
+)  # Snapshots change frequently
 
 # Upstream registry URLs (configurable)
 NPM_REGISTRY: str = os.environ.get("NPM_REGISTRY", "https://registry.npmjs.org")
@@ -53,4 +61,6 @@ MAX_RETRIES: int = int(os.environ.get("MAX_RETRIES", "3"))
 # MaxBodySizeMiddleware). Prevents unauthenticated memory-exhaustion DoS via
 # oversized POST bodies (e.g. npm audit/bulk endpoints, which buffer the
 # entire body to hash and forward upstream).
-MAX_REQUEST_BODY_BYTES: int = int(os.environ.get("MAX_REQUEST_BODY_BYTES", str(5 * 1024 * 1024)))
+MAX_REQUEST_BODY_BYTES: int = int(
+    os.environ.get("MAX_REQUEST_BODY_BYTES", str(5 * 1024 * 1024))
+)

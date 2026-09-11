@@ -18,10 +18,11 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 from urllib.parse import quote
+
 from fastapi import APIRouter, HTTPException, Request, Response
-import app.config as config
-import app.utils as utils
-from app.validators import validate_maven_path, safe_join_path, ValidationError
+
+from app import config, utils
+from app.validators import ValidationError, safe_join_path, validate_maven_path
 
 MAVEN_UPSTREAM = "https://repo1.maven.org/maven2"
 MAVEN_CACHE = config.CACHE_DIR / "maven"
@@ -38,31 +39,32 @@ async def maven_proxy(path: str, request: Request):
     """
     # SECURITY: Validate Maven path format
     if not validate_maven_path(path):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid Maven path: {path}"
-        )
-    
+        raise HTTPException(status_code=400, detail=f"Invalid Maven path: {path}")
+
     # Build a safe local cache path
     try:
         local_path = safe_join_path(MAVEN_CACHE, path)
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    
+
     # Determine if this is a metadata file that should be refreshed
-    is_metadata = path.endswith(('.xml', '.pom', '.sha1', '.md5'))
-    
+    is_metadata = path.endswith((".xml", ".pom", ".sha1", ".md5"))
+
     # Check if we need to fetch/refresh the file
     should_fetch = False
-    if not local_path.exists():
+    if (
+        not local_path.exists()
+        or is_metadata
+        and utils.is_cache_stale(
+            local_path, max_age_hours=config.MAVEN_METADATA_TTL_HOURS
+        )
+    ):
         should_fetch = True
-    elif is_metadata and utils.is_cache_stale(local_path, max_age_hours=config.MAVEN_METADATA_TTL_HOURS):
-        should_fetch = True
-    
+
     if should_fetch:
         upstream_url = f"{MAVEN_UPSTREAM}/{quote(path, safe='/')}"
         await utils.fetch_and_cache(upstream_url, local_path)
-    
+
     # Serve the file (conditional_file_response re-validates containment before serving)
     try:
         return await utils.conditional_file_response(
@@ -80,10 +82,7 @@ async def maven_head_proxy(path: str, request: Request):
     without sending the file body. Used by Maven clients to check existence/freshness.
     """
     if not validate_maven_path(path):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid Maven path: {path}"
-        )
+        raise HTTPException(status_code=400, detail=f"Invalid Maven path: {path}")
     try:
         local_path = safe_join_path(MAVEN_CACHE, path)
     except ValidationError as e:
@@ -91,9 +90,13 @@ async def maven_head_proxy(path: str, request: Request):
 
     is_metadata = path.endswith((".xml", ".pom", ".sha1", ".md5"))
     should_fetch = False
-    if not local_path.exists():
-        should_fetch = True
-    elif is_metadata and utils.is_cache_stale(local_path, max_age_hours=config.MAVEN_METADATA_TTL_HOURS):
+    if (
+        not local_path.exists()
+        or is_metadata
+        and utils.is_cache_stale(
+            local_path, max_age_hours=config.MAVEN_METADATA_TTL_HOURS
+        )
+    ):
         should_fetch = True
 
     if should_fetch:
@@ -102,7 +105,9 @@ async def maven_head_proxy(path: str, request: Request):
 
     try:
         # Only return headers, no body
-        response = await utils.conditional_file_response(request, local_path, "application/octet-stream")
+        response = await utils.conditional_file_response(
+            request, local_path, "application/octet-stream"
+        )
         return Response(
             status_code=response.status_code,
             headers=dict(response.headers),

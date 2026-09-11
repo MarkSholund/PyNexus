@@ -49,7 +49,8 @@ class MaxBodySizeMiddleware:
                 total += len(message.get("body") or b"")
                 if total > self.max_bytes:
                     raise HTTPException(
-                        status_code=413, detail="Request body too large")
+                        status_code=413, detail="Request body too large"
+                    )
             return message
 
         await self.app(scope, limited_receive, send)

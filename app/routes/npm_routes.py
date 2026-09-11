@@ -18,17 +18,17 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-from fastapi import APIRouter, HTTPException, Request
-from urllib.parse import quote
 from http import HTTPMethod
+from urllib.parse import quote
 
-import app.config as config
-import app.utils as utils
+from fastapi import APIRouter, HTTPException, Request
+
+from app import config, utils
 from app.validators import (
+    ValidationError,
+    safe_join_path,
     validate_npm_package_name,
     validate_tarball_name,
-    safe_join_path,
-    ValidationError
 )
 
 NPM_UPSTREAM = config.NPM_REGISTRY
@@ -65,7 +65,9 @@ async def npm_security_audit_quick(request: Request):
     body_hash = hashlib.sha256(body_bytes).hexdigest()[:16]
 
     try:
-        local_path = safe_join_path(NPM_CACHE, "security", "audits", f"{body_hash}.json")
+        local_path = safe_join_path(
+            NPM_CACHE, "security", "audits", f"{body_hash}.json"
+        )
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -104,13 +106,13 @@ async def npm_security_audit_quick(request: Request):
     if utils.is_cache_stale(local_path, max_age_hours=config.NPM_METADATA_TTL_HOURS):
         upstream_url = f"{NPM_UPSTREAM}/-/npm/v1/security/audits/quick"
         data = await utils.fetch_and_cache(
-            upstream_url, 
-            local_path, 
-            method=HTTPMethod.POST, 
+            upstream_url,
+            local_path,
+            method=HTTPMethod.POST,
             data=body_bytes,
             headers=headers,
             return_json=True,  # Return JSON directly
-            force_refresh=True  # Force fetch since cache is stale
+            force_refresh=True,  # Force fetch since cache is stale
         )
         return data
 
@@ -122,12 +124,12 @@ async def npm_security_audit_quick(request: Request):
         # Cache miss: fetch from upstream
         upstream_url = f"{NPM_UPSTREAM}/-/npm/v1/security/audits/quick"
         data = await utils.fetch_and_cache(
-            upstream_url, 
-            local_path, 
-            method=HTTPMethod.POST, 
+            upstream_url,
+            local_path,
+            method=HTTPMethod.POST,
             data=body_bytes,
             headers=headers,
-            return_json=True
+            return_json=True,
         )
         return data
 
@@ -185,13 +187,13 @@ async def npm_security_bulk(request: Request):
     if utils.is_cache_stale(local_path, max_age_hours=config.NPM_METADATA_TTL_HOURS):
         upstream_url = f"{NPM_UPSTREAM}/-/npm/v1/security/advisories/bulk"
         data = await utils.fetch_and_cache(
-            upstream_url, 
-            local_path, 
-            method=HTTPMethod.POST, 
+            upstream_url,
+            local_path,
+            method=HTTPMethod.POST,
             data=body_bytes,
             headers=headers,
             return_json=True,
-            force_refresh=True
+            force_refresh=True,
         )
         return data
 
@@ -203,12 +205,12 @@ async def npm_security_bulk(request: Request):
         # Cache miss: fetch from upstream
         upstream_url = f"{NPM_UPSTREAM}/-/npm/v1/security/advisories/bulk"
         data = await utils.fetch_and_cache(
-            upstream_url, 
-            local_path, 
-            method=HTTPMethod.POST, 
+            upstream_url,
+            local_path,
+            method=HTTPMethod.POST,
             data=body_bytes,
             headers=headers,
-            return_json=True
+            return_json=True,
         )
         return data
 
@@ -223,15 +225,13 @@ async def npm_package_tarball(package: str, tarball: str, request: Request):
     # SECURITY: Validate package name
     if not validate_npm_package_name(package):
         raise HTTPException(
-            status_code=400,
-            detail=f"Invalid NPM package name: {package}"
+            status_code=400, detail=f"Invalid NPM package name: {package}"
         )
 
     # SECURITY: Validate tarball filename
     if not validate_tarball_name(tarball):
         raise HTTPException(
-            status_code=400,
-            detail=f"Invalid tarball filename: {tarball}"
+            status_code=400, detail=f"Invalid tarball filename: {tarball}"
         )
 
     try:
@@ -241,7 +241,9 @@ async def npm_package_tarball(package: str, tarball: str, request: Request):
         raise HTTPException(status_code=400, detail=str(e))
 
     if not local_path.exists():
-        upstream_url = f"{NPM_UPSTREAM}/{encode_scoped_package(package)}/-/{quote(tarball)}"
+        upstream_url = (
+            f"{NPM_UPSTREAM}/{encode_scoped_package(package)}/-/{quote(tarball)}"
+        )
         await utils.fetch_and_cache(upstream_url, local_path)
 
     try:
@@ -262,8 +264,7 @@ async def npm_package_metadata(package: str, request: Request):
     # SECURITY: Validate package name format
     if not validate_npm_package_name(package):
         raise HTTPException(
-            status_code=400,
-            detail=f"Invalid NPM package name: {package}"
+            status_code=400, detail=f"Invalid NPM package name: {package}"
         )
 
     try:

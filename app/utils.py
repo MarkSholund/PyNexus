@@ -17,22 +17,24 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import asyncio
+import contextlib
 import hashlib
 import json
 import logging
 import os
 import tempfile
 import time
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from http import HTTPMethod
 from pathlib import Path
-from typing import Iterable, Optional
 
 import aiofiles
 import httpx2
 from fastapi import HTTPException, Request, Response
 
-import app.config as config
+from app import config
 
 logger = logging.getLogger("uvicorn")
 
@@ -135,20 +137,6 @@ async def fetch_and_cache(
 ):
     """
     Fetch from upstream (GET or POST), save to local cache atomically, optionally return JSON.
-
-    Args:
-        url: Upstream URL to fetch
-        dest: Destination path in cache
-        method: HTTP method (GET or POST)
-        data: Request body for POST requests
-        headers: HTTP headers to forward to upstream
-        return_json: If True, parse and return JSON content
-        timeout: Request timeout in seconds
-        force_refresh: If True, fetch even if file exists (for cache refresh)
-
-    Security notes:
-    - Rejects destinations not under config.CACHE_DIR.
-    - Writes to temp file in same directory, then os.replace() atomically.
     """
     cache_root = config.CACHE_DIR.resolve()
     try:
@@ -158,7 +146,6 @@ async def fetch_and_cache(
         logger.warning("Refused fetch_and_cache for dest outside cache: %s", dest)
         raise HTTPException(status_code=400, detail="Invalid cache destination")
 
-    # Return existing cache if not forcing refresh
     if dest.exists() and not force_refresh:
         if return_json:
             async with aiofiles.open(dest, "r", encoding="utf-8") as f:
@@ -166,15 +153,11 @@ async def fetch_and_cache(
             return json.loads(content)
         return dest
 
-    # Create parent directories if needed
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    # Prepare headers with defaults
     request_headers = strip_hop_by_hop_headers(headers) if headers else {}
-    if "user-agent" not in request_headers:
-        request_headers["user-agent"] = "fastapi-nexus-proxy/1.0"
+    request_headers.setdefault("user-agent", "fastapi-nexus-proxy/1.0")
 
-    # Fetch from upstream
     async with httpx2.AsyncClient(follow_redirects=True, timeout=timeout) as client:
         try:
             if method == HTTPMethod.POST:
@@ -187,38 +170,41 @@ async def fetch_and_cache(
                 status_code=e.response.status_code,
                 detail=f"Upstream error: {url}",
             ) from e
+        except httpx2.HTTPError as e:
+            # covers timeouts, connection errors, etc. — not just bad status codes
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to reach upstream: {url}",
+            ) from e
 
-    # Atomic write: temp file in same directory, then replace.
+    if return_json:
+        text = resp.text
+        payload = text.encode("utf-8")
+    else:
+        payload = resp.content
+
+    await asyncio.to_thread(_atomic_write, dest, payload)
+
+    if return_json:
+        return json.loads(text)
+    return dest
+
+
+def _atomic_write(dest: Path, data: bytes) -> None:
+    """Write `data` to `dest` atomically via a temp file + os.replace. Runs in a worker thread."""
     tmpname = None
     try:
-        if return_json:
-            text = resp.text
-            with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", delete=False, dir=str(dest.parent)
-            ) as tf:
-                tf.write(text)
-                tf.flush()
-                os.fsync(tf.fileno())
-                tmpname = tf.name
-            os.replace(tmpname, str(dest))
-            return json.loads(text)
-        else:
-            content_bytes = resp.content
-            with tempfile.NamedTemporaryFile(
-                mode="wb", delete=False, dir=str(dest.parent)
-            ) as tf:
-                tf.write(content_bytes)
-                tf.flush()
-                os.fsync(tf.fileno())
-                tmpname = tf.name
-            os.replace(tmpname, str(dest))
-            return dest
+        fd, tmpname = tempfile.mkstemp(dir=dest.parent)
+        with os.fdopen(fd, "wb") as tf:
+            tf.write(data)
+            tf.flush()
+            os.fsync(tf.fileno())
+        os.replace(tmpname, dest)
+        tmpname = None
     finally:
-        try:
-            if tmpname and os.path.exists(tmpname):
+        if tmpname is not None:
+            with contextlib.suppress(FileNotFoundError):
                 os.unlink(tmpname)
-        except Exception:
-            pass
 
 
 # ----------------------------------------------------------------------
@@ -237,9 +223,9 @@ def open_cached_file(path: Path) -> bytes:
 def make_etag_and_last_modified(path: Path):
     stat = path.stat()
     etag = hashlib.sha256(
-        f"{path.name}-{stat.st_mtime}-{stat.st_size}".encode("utf-8")
+        f"{path.name}-{stat.st_mtime}-{stat.st_size}".encode()
     ).hexdigest()
-    last_modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).strftime(
+    last_modified = datetime.fromtimestamp(stat.st_mtime, tz=UTC).strftime(
         "%a, %d %b %Y %H:%M:%S GMT"
     )
     return etag, last_modified
@@ -257,7 +243,7 @@ async def conditional_file_response(
     request: Request,
     path: Path,
     media_type: str,
-    attachment: Optional[bool] = False,
+    attachment: bool | None = False,
 ) -> Response:
     """
     Return a Response with ETag/Last-Modified headers and conditional GET support.
