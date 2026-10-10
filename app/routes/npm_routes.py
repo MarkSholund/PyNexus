@@ -276,7 +276,9 @@ async def npm_package_metadata(package: str, request: Request):
     # Use is_cache_stale from utils.py for 24h staleness check
     if utils.is_cache_stale(local_path, max_age_hours=config.NPM_METADATA_TTL_HOURS):
         upstream_url = f"{NPM_UPSTREAM}/{encode_scoped_package(package)}"
-        await utils.fetch_and_cache(upstream_url, local_path)
+        # Must force a refresh: plain fetch_and_cache() returns the existing
+        # file untouched, which would leave stale metadata in place forever.
+        await utils.refresh_cached(upstream_url, local_path)
 
     try:
         return await utils.conditional_file_response(

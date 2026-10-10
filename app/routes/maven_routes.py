@@ -63,7 +63,7 @@ async def maven_proxy(path: str, request: Request):
 
     if should_fetch:
         upstream_url = f"{MAVEN_UPSTREAM}/{quote(path, safe='/')}"
-        await utils.fetch_and_cache(upstream_url, local_path)
+        await utils.refresh_cached(upstream_url, local_path)
 
     # Serve the file (conditional_file_response re-validates containment before serving)
     try:
@@ -101,7 +101,7 @@ async def maven_head_proxy(path: str, request: Request):
 
     if should_fetch:
         upstream_url = f"{MAVEN_UPSTREAM}/{quote(path, safe='/')}"
-        await utils.fetch_and_cache(upstream_url, local_path)
+        await utils.refresh_cached(upstream_url, local_path)
 
     try:
         # Only return headers, no body

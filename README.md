@@ -25,6 +25,15 @@ A simple **FastAPI-based proxy server** for caching and serving Maven and PyPI a
 
 ---
 
+## Preparation
+
+Before Nexus can be installed on an offline system, the dependencies need to be available.
+On your UNCLASS system:
+
+```bash
+bash update_requirements.sh # creates a new requirements.txt file and downloads all dependencies
+```
+
 ## Installation
 
 1. **Clone the repository**
@@ -44,17 +53,8 @@ source venv/bin/activate
 3. **Install dependencies**
 
 ```bash
-pip install -r requirements.txt
+bash install_requirements.sh
 ```
-
-> Ensure `requirements.txt` includes at least:
->
-> ```text
-> fastapi
-> uvicorn
-> httpx
-> beautifulsoup4
-> ```
 
 ---
 

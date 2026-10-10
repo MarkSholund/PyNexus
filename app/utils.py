@@ -190,6 +190,27 @@ async def fetch_and_cache(
     return dest
 
 
+async def refresh_cached(url: str, dest: Path) -> Path:
+    """
+    Re-fetch `url` into `dest`, bypassing fetch_and_cache's "already cached"
+    shortcut. Intended for entries that is_cache_stale() says need refreshing.
+
+    If upstream is unreachable or errors but a cached copy exists, keep serving
+    the stale copy (logged) rather than failing the client. If there is no
+    cached copy, the upstream error propagates.
+    """
+    had_cached_copy = dest.exists()
+    try:
+        return await fetch_and_cache(url, dest, force_refresh=True)
+    except HTTPException as e:
+        if not had_cached_copy:
+            raise
+        logger.warning(
+            "Refresh of %s failed (%s); serving stale cache %s", url, e.status_code, dest
+        )
+        return dest
+
+
 def _atomic_write(dest: Path, data: bytes) -> None:
     """Write `data` to `dest` atomically via a temp file + os.replace. Runs in a worker thread."""
     tmpname = None

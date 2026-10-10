@@ -176,8 +176,10 @@ async def pypi_package_json(package: str, request: Request):
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    if not local_path.exists():
-        await utils.fetch_and_cache(f"{PYPI_UPSTREAM}/pypi/{package}/json", local_path)
+    # Package-level JSON lists the latest release, so it must be refreshed
+    # once stale (a missing file counts as stale).
+    if utils.is_cache_stale(local_path, config.PYPI_METADATA_TTL_HOURS):
+        await utils.refresh_cached(f"{PYPI_UPSTREAM}/pypi/{package}/json", local_path)
 
     return await utils.conditional_file_response(
         request, local_path, "application/json"
