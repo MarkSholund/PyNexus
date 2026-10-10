@@ -19,6 +19,8 @@ from fastapi import HTTPException
 from app import config, utils
 from app.routes import maven_routes, npm_routes, pypi_routes
 
+pytestmark = pytest.mark.asyncio
+
 TWO_DAYS = 2 * 24 * 3600
 
 
