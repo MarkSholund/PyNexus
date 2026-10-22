@@ -71,6 +71,20 @@ def _fake_client(get=None):
     return patch("app.routes.pypi_routes.httpx2.AsyncClient", return_value=cm)
 
 
+def _make_dir_symlink(link, target):
+    """
+    Create a directory symlink, or skip the test if the OS won't allow it.
+
+    On Windows, creating symlinks needs Developer Mode or an elevated shell
+    (otherwise OSError / WinError 1314), and directory links must be created
+    with target_is_directory=True.
+    """
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError) as e:
+        pytest.skip(f"symlinks not available on this system: {e}")
+
+
 def _resp(status=200, text=""):
     r = MagicMock()
     r.status_code = status
@@ -309,7 +323,9 @@ def test_rewrite_index_html_relative_pypi_query_and_fragment():
 
 @pytest.mark.asyncio
 async def test_pypi_artifact_unsafe_cache_path_400(cache):
-    with patch("app.routes.pypi_routes.utils.safe_cache_path", side_effect=ValueError("x")):
+    with patch(
+        "app.routes.pypi_routes.utils.safe_cache_path", side_effect=ValueError("x")
+    ):
         with pytest.raises(HTTPException) as exc:
             await pypi_routes.pypi_artifact("ab/cd/pkg-1.0.whl", _request())
     assert exc.value.status_code == 400
@@ -353,7 +369,7 @@ def test_safe_cache_path_rejects_symlink_escape(tmp_path):
     outside.mkdir()
     root = tmp_path / "root"
     root.mkdir()
-    (root / "link").symlink_to(outside)
+    _make_dir_symlink(root / "link", outside)
     with pytest.raises(ValueError, match="outside cache"):
         utils.safe_cache_path(root, "link", "x.txt")
 
@@ -428,7 +444,9 @@ async def test_fetch_and_serve_json_fetches_on_miss(cache):
         patch("app.utils.fetch_and_cache", fetch),
         patch("app.utils.conditional_file_response", cond),
     ):
-        result = await utils.fetch_and_serve_json("https://x.test/doc", dest, _request())
+        result = await utils.fetch_and_serve_json(
+            "https://x.test/doc", dest, _request()
+        )
 
     assert result == "resp"
     fetch.assert_awaited_once()
@@ -536,6 +554,6 @@ def test_safe_join_path_rejects_symlink_escape(tmp_path):
     outside.mkdir()
     base = tmp_path / "base"
     base.mkdir()
-    (base / "link").symlink_to(outside)
+    _make_dir_symlink(base / "link", outside)
     with pytest.raises(ValidationError, match="traversal"):
         safe_join_path(base, "link", "x")

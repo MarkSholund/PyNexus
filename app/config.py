@@ -38,6 +38,7 @@ NPM_TARBALL_TTL_HOURS: int = int(
     os.environ.get("NPM_TARBALL_TTL_HOURS", "0")
 )  # Immutable artifacts
 NPM_SECURITY_TTL_HOURS: int = int(os.environ.get("NPM_SECURITY_TTL_HOURS", "6"))
+NPM_SEARCH_TTL_HOURS: int = int(os.environ.get("NPM_SEARCH_TTL_HOURS", "6"))
 
 # Maven TTL settings
 MAVEN_METADATA_TTL_HOURS: int = int(os.environ.get("MAVEN_METADATA_TTL_HOURS", "24"))

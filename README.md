@@ -100,12 +100,20 @@ GET /maven2/{groupId}/{artifactId}/{version}/{artifact}.jar
 - **PyPI proxy**
 
 ```
-GET /pypi/simple/                   # Root HTML index
-GET /pypi/simple/{package}/          # Package index HTML
+GET /pypi/simple/                   # Root index (HTML or JSON, see below)
+GET /pypi/simple/{package}/          # Package index (HTML or JSON, see below)
 GET /pypi/{package}/json             # Package JSON metadata
 GET /pypi/{package}/{version}/json   # Version-specific JSON
 GET /pypi/packages/{path}            # Package files (wheel, tar, zip, etc.)
 ```
+
+  The simple endpoints support both formats of the PyPI simple API via content
+  negotiation on the `Accept` header: PEP 691 JSON
+  (`application/vnd.pypi.simple.v1+json`, what current pip and uv ask for) and
+  HTML (the default, also used for `*/*` or no `Accept` header). Each format is
+  cached separately, file links in both are rewritten to `/pypi/packages/...`,
+  and responses carry `Vary: Accept`. PEP 658 `.metadata` files are served
+  through `/pypi/packages/...`.
 
 - **NPM proxy**
 
@@ -113,6 +121,8 @@ GET /pypi/packages/{path}            # Package files (wheel, tar, zip, etc.)
 GET /npm/{package}                   # Package metadata JSON (cached)
 GET /npm/{package}/-/{tarball}       # Package tarball (fetched on-demand)
 POST /npm/-/npm/v1/security/advisories/bulk  # Proxies npm audit bulk requests (cached by body hash)
+GET /npm/-/ping                      # Health check for `npm ping` / `npm doctor`
+GET /npm/-/v1/search?text=...        # `npm search` (cached by query; TTL: NPM_SEARCH_TTL_HOURS)
 ```
 
 ---
@@ -190,6 +200,7 @@ export PYPI_METADATA_TTL_HOURS=12
 
 - `NPM_METADATA_TTL_HOURS` — NPM metadata cache TTL (default: `24`)
   - Applies to `/npm/{package}` metadata and security advisories
+- `NPM_SEARCH_TTL_HOURS` — `npm search` result cache TTL (default: `6`)
 
 ```bash
 export NPM_METADATA_TTL_HOURS=24

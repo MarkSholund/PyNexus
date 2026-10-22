@@ -18,10 +18,11 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
+import re
 from http import HTTPMethod
-from urllib.parse import quote
+from urllib.parse import quote, urlencode, urlparse
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from app import config, utils
 from app.validators import (
@@ -34,7 +35,8 @@ from app.validators import (
 NPM_UPSTREAM = config.NPM_REGISTRY
 NPM_CACHE = config.CACHE_DIR / "npm"
 
-router = APIRouter(prefix="/npm", tags=["npm"])
+ROUTE_PREFIX = "/npm"
+router = APIRouter(prefix=ROUTE_PREFIX, tags=["npm"])
 
 
 def encode_scoped_package(pkg: str) -> str:
@@ -47,6 +49,126 @@ def encode_scoped_package(pkg: str) -> str:
         scope, name = pkg.split("/", 1)
         return f"{quote(scope)}/{name}"
     return quote(pkg)
+
+
+def rewrite_tarball_urls(body: bytes, upstream: str, base_url: str) -> bytes:
+    """
+    Point every ``dist.tarball`` URL in a packument at this proxy.
+
+    Upstream metadata contains absolute tarball URLs such as
+    ``https://registry.npmjs.org/vue/-/vue-3.5.0.tgz``. Clients only translate
+    those to the configured registry on a best-effort basis (and different npm
+    versions drop the proxy's ``/npm`` path prefix, giving 404s), so we rewrite
+    them to ``{base_url}/vue/-/vue-3.5.0.tgz`` ourselves.
+
+    Only the ``"tarball"`` fields are touched, so package readmes or other
+    text that merely mention the registry are left alone.
+    """
+    netloc = urlparse(upstream).netloc
+    if not netloc:
+        return body
+    pattern = re.compile(
+        rb'("tarball"\s*:\s*")https?://' + re.escape(netloc.encode()) + rb"/"
+    )
+    replacement = base_url.rstrip("/").encode() + b"/"
+    return pattern.sub(lambda m: m.group(1) + replacement, body)
+
+
+def _public_base_url(request: Request) -> str:
+    """External URL of this router, honouring the reverse proxy's headers."""
+    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
+    scheme = scheme.split(",")[0].strip()
+    host = request.headers.get("host") or request.url.netloc
+    root_path = request.scope.get("root_path", "").rstrip("/")
+    return f"{scheme}://{host}{root_path}{ROUTE_PREFIX}"
+
+
+# Query parameters accepted by the upstream search endpoint. Anything else is
+# dropped so clients can't use the cache to store arbitrary upstream queries.
+_SEARCH_MAX_TEXT = 256
+_SEARCH_MAX_SIZE = 250
+_SEARCH_WEIGHTS = ("quality", "popularity", "maintenance")
+
+
+def _normalize_search_params(query_params) -> list[tuple[str, str]]:
+    """
+    Validate and canonicalize `npm search` query parameters.
+    Returns a sorted list of (name, value) pairs; raises HTTPException(400).
+    """
+    params: dict[str, str] = {}
+
+    text = query_params.get("text")
+    if text is None:
+        raise HTTPException(status_code=400, detail="Missing required parameter: text")
+    if len(text) > _SEARCH_MAX_TEXT or "\0" in text:
+        raise HTTPException(status_code=400, detail="Invalid search text")
+    params["text"] = text
+
+    for name, upper in (("size", _SEARCH_MAX_SIZE), ("from", None)):
+        raw = query_params.get(name)
+        if raw is None:
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid {name}: {raw}")
+        if value < 0 or (upper is not None and value > upper):
+            raise HTTPException(status_code=400, detail=f"Invalid {name}: {raw}")
+        params[name] = str(value)
+
+    for name in _SEARCH_WEIGHTS:
+        raw = query_params.get(name)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid {name}: {raw}")
+        if not 0.0 <= value <= 1.0:
+            raise HTTPException(status_code=400, detail=f"Invalid {name}: {raw}")
+        params[name] = raw
+
+    return sorted(params.items())
+
+
+@router.get("/-/ping")
+async def npm_ping():
+    """
+    Registry health check used by `npm ping` and `npm doctor`.
+    Answered locally (like the real registry, which returns `{}`), so it
+    reflects whether *this proxy* is reachable.
+    """
+    return {}
+
+
+@router.get("/-/v1/search")
+async def npm_search(request: Request):
+    """
+    Proxy `npm search` queries.
+    Example: GET /npm/-/v1/search?text=vue&size=20&from=0
+    Responses are cached by a hash of the normalized query and refreshed after
+    NPM_SEARCH_TTL_HOURS.
+    """
+    import hashlib
+
+    params = _normalize_search_params(request.query_params)
+    query = urlencode(params)
+    key = hashlib.sha256(query.encode()).hexdigest()[:16]
+
+    try:
+        local_path = safe_join_path(NPM_CACHE, "search", f"{key}.json")
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if utils.is_cache_stale(local_path, max_age_hours=config.NPM_SEARCH_TTL_HOURS):
+        await utils.refresh_cached(f"{NPM_UPSTREAM}/-/v1/search?{query}", local_path)
+
+    try:
+        return await utils.conditional_file_response(
+            request, local_path, "application/json"
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Search results not found")
 
 
 @router.post("/-/npm/v1/security/audits/quick")
@@ -281,8 +403,18 @@ async def npm_package_metadata(package: str, request: Request):
         await utils.refresh_cached(upstream_url, local_path)
 
     try:
-        return await utils.conditional_file_response(
+        response = await utils.conditional_file_response(
             request, local_path, "application/json"
         )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Package not found")
+
+    if isinstance(response, Response) and response.status_code == 200:
+        body = rewrite_tarball_urls(
+            response.body, NPM_UPSTREAM, _public_base_url(request)
+        )
+        headers = {
+            k: v for k, v in response.headers.items() if k.lower() != "content-length"
+        }
+        return Response(content=body, headers=headers, media_type="application/json")
+    return response
